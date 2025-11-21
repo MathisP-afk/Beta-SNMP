@@ -28,7 +28,7 @@ security = HTTPBearer()
 # FONCTION DE VALIDATION DE CLÉ API
 # ============================================================================
 
-async def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """
     Valide la clé API fournie dans l'en-tête Authorization
     Utilise la base de données pour vérifier la validité de la clé
