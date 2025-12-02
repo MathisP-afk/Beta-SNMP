@@ -1,0 +1,17 @@
+# Cœur réseau et API
+scapy
+requests
+fastapi
+uvicorn
+pydantic
+
+# Interface graphique
+flet
+
+# Outils de test et qualité (pour la pipeline)
+pytest
+httpx
+pylint
+
+# BDD 
+sqlite3
