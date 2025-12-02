@@ -13,7 +13,7 @@ import json
 # INITIALISATION DE L'API ET DE LA BASE DE DONNÉES
 # ============================================================================
 
-db = SNMPDatabase("snmp_api.db")
+db = SNMPDatabase("exemple_snmp.db")
 db.ajouter_cle_api(description="Clé initiale générée au démarrage de l'API")
 app = FastAPI(
     title="API SNMP Monitoring",
@@ -28,7 +28,7 @@ security = HTTPBearer()
 # FONCTION DE VALIDATION DE CLÉ API
 # ============================================================================
 
-def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
+async def validate_api_key(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """
     Valide la clé API fournie dans l'en-tête Authorization
     Utilise la base de données pour vérifier la validité de la clé
@@ -495,4 +495,10 @@ def health_check() -> Dict[str, Any]:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        ssl_keyfile="ssl/key.pem",
+        ssl_certfile="ssl/fullcert.pem"
+        )
