@@ -12,6 +12,3 @@ flet
 pytest
 httpx
 pylint
-
-# BDD 
-sqlite3
