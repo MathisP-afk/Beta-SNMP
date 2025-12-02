@@ -11,8 +11,6 @@ Adaptations:
 
 import flet as ft
 from datetime import datetime
-import json
-import sqlite3
 
 # Import de la classe fournie
 from snmp_database import SNMPDatabase
@@ -235,15 +233,18 @@ class SNMPMonitorApp:
             for pkt in recent_packets:
                 icon = ft.Icons.HELP_OUTLINE
                 color = ft.Colors.GREY
-                if 'Get' in str(pkt.get('type_pdu', '')):
+                if 'GET' in str(pkt.get('type_pdu', '')):
                     icon = ft.Icons.GET_APP
                     color = ft.Colors.GREEN
-                elif 'Set' in str(pkt.get('type_pdu', '')):
+                elif 'SET' in str(pkt.get('type_pdu', '')):
                     icon = ft.Icons.SEND
                     color = ft.Colors.ORANGE
-                elif 'Trap' in str(pkt.get('type_pdu', '')):
+                elif 'TRAP' in str(pkt.get('type_pdu', '')):
                     icon = ft.Icons.WARNING
                     color = ft.Colors.RED
+                elif 'RESPONSE' in str(pkt.get('type_pdu', '')):
+                    icon = ft.Icons.TRY_SMS_STAR_ROUNDED
+                    color = ft.Colors.PINK_700
 
                 recent_rows.append(
                     ft.ListTile(
@@ -520,4 +521,10 @@ class SNMPMonitorApp:
 
 if __name__ == "__main__":
     app = SNMPMonitorApp()
-    ft.app(target=app.main)
+    ft.app(
+        target=app.main,
+        view=ft.WEB_BROWSER,         # <— mode Web
+        port=0,                      # port aléatoire
+        assets_dir="assets",          # si vous avez des assets (images, fonts…)
+        
+    )
