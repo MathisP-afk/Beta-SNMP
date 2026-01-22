@@ -51,6 +51,44 @@ PDU_MAPPING = {
     'InformRequest': 'INFORM'
 }
 
+# Bibliothèque OID simplifiée (Peut être étendue)
+OID_LIBRARY = {
+    # System
+    '1.3.6.1.2.1.1.1.0': ('sysDescr', 'Description du système'),
+    '1.3.6.1.2.1.1.2.0': ('sysObjectID', 'ID Objet Système'),
+    '1.3.6.1.2.1.1.3.0': ('sysUpTime', 'Temps de fonctionnement'),
+    '1.3.6.1.2.1.1.4.0': ('sysContact', 'Contact administrateur'),
+    '1.3.6.1.2.1.1.5.0': ('sysName', 'Nom du système'),
+    '1.3.6.1.2.1.1.6.0': ('sysLocation', 'Emplacement physique'),
+    '1.3.6.1.2.1.1.7.0': ('sysServices', 'Services offerts'),
+    
+    # Interfaces
+    '1.3.6.1.2.1.2.1.0': ('ifNumber', 'Nombre d\'interfaces'),
+    '1.3.6.1.2.1.2.2.1.2': ('ifDescr', 'Description interface'),
+    '1.3.6.1.2.1.2.2.1.5': ('ifSpeed', 'Vitesse interface'),
+    '1.3.6.1.2.1.2.2.1.6': ('ifPhysAddress', 'Adresse MAC'),
+    '1.3.6.1.2.1.2.2.1.7': ('ifAdminStatus', 'Statut Admin (1=UP, 2=DOWN)'),
+    '1.3.6.1.2.1.2.2.1.8': ('ifOperStatus', 'Statut Opérationnel'),
+    '1.3.6.1.2.1.2.2.1.10': ('ifInOctets', 'Octets reçus'),
+    '1.3.6.1.2.1.2.2.1.16': ('ifOutOctets', 'Octets envoyés'),
+    
+    # IP
+    '1.3.6.1.2.1.4.1.0': ('ipForwarding', 'IP Forwarding (1=yes)'),
+    '1.3.6.1.2.1.4.20.1.1': ('ipAdEntAddr', 'Adresse IP'),
+    
+    # Host Resources
+    '1.3.6.1.2.1.25.1.1.0': ('hrSystemUptime', 'Uptime hôte'),
+    '1.3.6.1.2.1.25.2.2.0': ('hrMemorySize', 'Mémoire RAM totale'),
+    
+    # UCD-SNMP (Linux)
+    '1.3.6.1.4.1.2021.4.3.0': ('memTotalSwap', 'Swap Total'),
+    '1.3.6.1.4.1.2021.4.5.0': ('memTotalReal', 'RAM Totale'),
+    '1.3.6.1.4.1.2021.4.6.0': ('memAvailReal', 'RAM Disponible'),
+    '1.3.6.1.4.1.2021.10.1.3.1': ('laLoad.1', 'Load Average 1min'),
+    '1.3.6.1.4.1.2021.10.1.3.2': ('laLoad.5', 'Load Average 5min'),
+    '1.3.6.1.4.1.2021.10.1.3.3': ('laLoad.15', 'Load Average 15min'),
+}
+
 class SNMPPacketQueue:
     def __init__(self, max_size=100000):
         self.queue = queue.Queue(maxsize=max_size)
@@ -122,20 +160,54 @@ class SNMPSnifferMultithreading:
         except:
             return obj
 
+    def get_oid_info(self, oid: str) -> tuple:
+        """Retourne (Nom, Description) pour un OID donné si connu"""
+        # Recherche exacte
+        if oid in OID_LIBRARY:
+            return OID_LIBRARY[oid]
+        
+        # Recherche préfixe (pour les tables/indexes)
+        best_match = None
+        max_len = 0
+        
+        for k, v in OID_LIBRARY.items():
+            if oid.startswith(k) and len(k) > max_len:
+                # Vérifie que la suite est un point (pour éviter 1.2 vs 1.20)
+                if len(oid) == len(k) or oid[len(k)] == '.':
+                    best_match = v
+                    max_len = len(k)
+                    
+        return best_match if best_match else ("Unknown_OID", "OID non reconnu")
+
     def analyser_severite(self, packet_info: Dict) -> str:
         contenu = packet_info.get('contenu', {})
         varbinds = contenu.get('varbinds', [])
-        if not varbinds: return 'NORMAL'
-
+        
         score_anomalie = 0
+        
+        # Sévérité basée sur le type de requête
+        type_pdu = packet_info.get('type_pdu', 'UNKNOWN')
+        if type_pdu == 'SET':
+            score_anomalie += 10 # Les SET sont toujours sensibles
+            
         for vb in varbinds:
             oid = vb.get('oid', '')
-            # OID trop long
+            nom_oid = vb.get('oid_name', '')
+            
+            # OID trop long (buffer overflow attempt?)
             if len(oid) > 128: score_anomalie += 50
-            # OID ne respectant pas le standard (sauf s'il est vide/racine)
+            
+            # OID ne respectant pas le standard
             if oid and not oid.startswith('1.3.'): score_anomalie += 20
+            
             # Caractères bizarres
             if not re.match(r'^[0-9.]+$', oid): score_anomalie += 30
+            
+            # Modification de paramètres système critiques
+            if type_pdu == 'SET':
+                if 'sysLocation' in nom_oid: score_anomalie += 40
+                if 'ifAdminStatus' in nom_oid: score_anomalie += 60 # Shutting down interface?
+                if 'sysName' in nom_oid: score_anomalie += 30
 
         if score_anomalie >= 50: return 'CRITIQUE'
         elif score_anomalie >= 20: return 'ELEVEE'
@@ -198,6 +270,9 @@ class SNMPSnifferMultithreading:
                             val = self._safe_val(varbind.value)
                             type_asn1 = varbind.value.__class__.__name__
                             
+                            # Décodage OID
+                            nom_oid, desc_oid = self.get_oid_info(oid)
+                            
                             # Gestion spécifique des NULL (Questions)
                             if type_asn1 == 'ASN1_NULL' or type_asn1 == 'Null':
                                 value_str = "NULL" # On marque explicitement NULL au lieu de 0
@@ -207,17 +282,20 @@ class SNMPSnifferMultithreading:
                                 except:
                                     value_str = str(val)
 
-                            # On ajoute tout au dictionnaire, même les NULL (car demandé)
+                            # On ajoute tout au dictionnaire
                             valeurs_dict[oid] = value_str
 
                             varbinds_list.append({
                                 "oid": oid,
+                                "oid_name": nom_oid,         # AJOUT
+                                "oid_desc": desc_oid,        # AJOUT
                                 "value": value_str,
                                 "type": type_asn1
                             })
 
                             if not oid_racine_trouve:
-                                packet_info['oid_racine'] = oid
+                                packet_info['oid_racine'] = oid # On garde l'OID brut pour le filtrage rapide
+                                packet_info['oid_racine_name'] = nom_oid # Mais on a l'info dispo
                                 oid_racine_trouve = True
 
                     packet_info['contenu'] = {
@@ -237,21 +315,31 @@ class SNMPSnifferMultithreading:
         packet_info = self.parse_snmp_packet(packet)
         
         if packet_info: 
-            # 1. Vérification Anti-Spam
+            # 1. Analyse Sévérité & Décodage
             severite = self.analyser_severite(packet_info)
+            
+            # Gestion des Alertes d'URGENCE
             if severite in ['ELEVEE', 'CRITIQUE']:
-                packet_info['type_pdu'] = "BLOCKED_SPAM"
+                logger.warning(f"🚨 ALERTE SEVERITE {severite} détectée ! Source: {packet_info['source_ip']}")
+                
+                # On modifie le paquet pour qu'il apparaisse clairement comme une alerte dans l'App Web
+                packet_info['type_pdu'] = "ALERTE_URGENTE"  # Sera affiché en Rouge/Spécial
+                
                 packet_info['contenu']['alerte_securite'] = {
                     "niveau": severite,
-                    "message": "OID Suspect détecté",
-                    "timestamp": datetime.datetime.now().isoformat()
+                    "message": "⚠️ ACTIVITÉ ANORMALE DÉTECTÉE ⚠️ - Analyse requise",
+                    "timestamp": datetime.datetime.now().isoformat(),
+                    "details": "Modifications système critiques ou OID malformé",
+                    "action_requise": "Vérifier la source " + packet_info['source_ip']
                 }
-                with self.stats_lock: self.stats['spam_blocked'] += 1
-                # On envoie quand même à la file pour l'alerte API
+                
+                with self.stats_lock: self.stats['spam_blocked'] += 1 # On compte comme "bloqué/alerté"
+                
+                # On envoie à la file pour l'API (pour affichage Web)
                 self.packet_queue.put_packet(packet_info)
                 return
 
-            # 2. Pas de filtrage fonctionnel : ON PREND TOUT (GET & RESPONSE)
+            # 2. Pas de filtrage fonctionnel : ON PREND TOUT
             self.packet_queue.put_packet(packet_info)
             with self.stats_lock: self.stats['total_captured'] += 1
 
@@ -263,6 +351,7 @@ class SNMPSnifferMultithreading:
         
         for packet in packets:
             try:
+                # Si le type est inconnu, on skip
                 if packet.get('type_pdu') == "UNKNOWN": continue
 
                 payload = {
@@ -336,7 +425,7 @@ class SNMPSnifferMultithreading:
                 if not self.capture_thread.is_alive(): break
         except KeyboardInterrupt:
             self.stop()
-
+            
     def stop(self):
         logger.info("[MAIN] Arrêt...")
         self.running = False
@@ -344,7 +433,7 @@ class SNMPSnifferMultithreading:
     def print_stats(self):
         with self.stats_lock:
             s = self.stats
-            logger.info(f"[STATS] Q:{self.packet_queue.size()} | Sent:{s['api_sent']} | SpamBlocked:{s['spam_blocked']}")
+            logger.info(f"[STATS] Q:{self.packet_queue.size()} | Sent:{s['api_sent']} | Alerts:{s['spam_blocked']}")
 
 def get_best_interface():
     try:
