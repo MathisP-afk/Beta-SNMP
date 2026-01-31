@@ -6,14 +6,18 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 import logging
-from pysnmp.hlapi.v3arch import (
+import asyncio
+from pysnmp.hlapi.v3arch.asyncio import (
     SnmpEngine, UsmUserData, ContextData, ObjectType, ObjectIdentity,
-    getCmd, setCmd, bulkCmd,
+    get_cmd, set_cmd, bulk_cmd,
+    UdpTransportTarget,
+    Integer
+)
+from pysnmp.proto.rfc1902 import Integer32
+from pysnmp.hlapi.v3arch import (
     USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5,
     USM_PRIV_CFB128_AES, USM_PRIV_CFB192_AES, USM_PRIV_CFB256_AES,
     USM_PRIV_CBC56_DES,
-    UdpTransportTarget,
-    Integer
 )
 from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
@@ -39,7 +43,7 @@ class SNMPv3Client:
     
     Features:
     - SNMPv3 with authentication (MD5, SHA) and privacy (DES, AES)
-    - GET, SET, WALK, BULKWALK operations
+    - GET, SET, WALK, BULKWALK operations (async-based)
     - Automatic retry and timeout handling
     - Detailed error reporting
     """
@@ -52,8 +56,8 @@ class SNMPv3Client:
             target: SNMPTarget instance with credentials and connection params
         """
         self.target = target
+        self.snmp_engine = SnmpEngine()
         self._setup_user_data()
-        self._setup_transport()
         logger.info(f"SNMPv3 client initialized for {target.ip_address}")
     
     def _setup_user_data(self) -> None:
@@ -98,13 +102,13 @@ class SNMPv3Client:
             logger.error(f"Failed to setup SNMPv3 user data: {e}")
             raise
     
-    def _setup_transport(self) -> None:
+    async def _get_transport_target(self) -> UdpTransportTarget:
         """
-        Setup UDP transport target.
+        Setup UDP transport target asynchronously.
         """
-        self.transport_target = UdpTransportTarget(
-            hostName=self.target.ip_address,
-            port=self.target.port,
+        transport_target = await UdpTransportTarget.create(
+            self.target.ip_address,
+            self.target.port,
             timeout=self.target.timeout,
             retries=self.target.retries,
         )
@@ -113,8 +117,9 @@ class SNMPv3Client:
             f"Transport to {self.target.ip_address}:{self.target.port} "
             f"(timeout={self.target.timeout}s, retries={self.target.retries})"
         )
+        return transport_target
     
-    def get(self, oid: str) -> Optional[Any]:
+    async def get(self, oid: str) -> Optional[Any]:
         """
         Perform SNMP GET operation.
         
@@ -125,15 +130,15 @@ class SNMPv3Client:
             Value or None if error
         """
         try:
-            iterator = getCmd(
-                SnmpEngine(),
+            transport_target = await self._get_transport_target()
+            
+            error_indication, error_status, error_index, var_binds = await get_cmd(
+                self.snmp_engine,
                 self.user_data,
-                self.transport_target,
+                transport_target,
                 ContextData(),
                 ObjectType(ObjectIdentity(oid)),
             )
-            
-            error_indication, error_status, error_index, var_binds = next(iterator)
             
             if error_indication:
                 logger.error(f"SNMP GET error: {error_indication}")
@@ -155,7 +160,7 @@ class SNMPv3Client:
             logger.error(f"Exception during GET: {e}")
             return None
     
-    def get_multiple(self, oids: List[str]) -> Dict[str, Any]:
+    async def get_multiple(self, oids: List[str]) -> Dict[str, Any]:
         """
         Perform SNMP GET for multiple OIDs.
         
@@ -167,11 +172,11 @@ class SNMPv3Client:
         """
         results = {}
         for oid in oids:
-            value = self.get(oid)
+            value = await self.get(oid)
             results[oid] = value
         return results
     
-    def set(self, oid: str, value: Any, value_type: str = None) -> bool:
+    async def set(self, oid: str, value: Any, value_type: str = None) -> bool:
         """
         Perform SNMP SET operation.
         
@@ -184,20 +189,20 @@ class SNMPv3Client:
             True if successful
         """
         try:
+            transport_target = await self._get_transport_target()
+            
             # Determine value type
             snmp_value = value
             if value_type == 'integer' or isinstance(value, int):
-                snmp_value = Integer(value)
+                snmp_value = Integer32(value)
             
-            iterator = setCmd(
-                SnmpEngine(),
+            error_indication, error_status, error_index, var_binds = await set_cmd(
+                self.snmp_engine,
                 self.user_data,
-                self.transport_target,
+                transport_target,
                 ContextData(),
                 ObjectType(ObjectIdentity(oid), snmp_value),
             )
-            
-            error_indication, error_status, error_index, var_binds = next(iterator)
             
             if error_indication:
                 logger.error(f"SNMP SET error: {error_indication}")
@@ -217,7 +222,7 @@ class SNMPv3Client:
             logger.error(f"Exception during SET: {e}")
             return False
     
-    def walk(self, oid: str) -> Dict[str, Any]:
+    async def walk(self, oid: str) -> Dict[str, Any]:
         """
         Perform SNMP WALK (GET-NEXT tree walk).
         
@@ -229,16 +234,16 @@ class SNMPv3Client:
         """
         results = {}
         try:
-            iterator = bulkCmd(
-                SnmpEngine(),
+            transport_target = await self._get_transport_target()
+            
+            async for error_indication, error_status, error_index, var_binds in bulk_cmd(
+                self.snmp_engine,
                 self.user_data,
-                self.transport_target,
+                transport_target,
                 ContextData(),
                 0, 25,  # nonRepeaters, maxRepetitions
                 ObjectType(ObjectIdentity(oid)),
-            )
-            
-            for error_indication, error_status, error_index, var_binds in iterator:
+            ):
                 if error_indication:
                     logger.error(f"SNMP WALK error: {error_indication}")
                     break
@@ -262,7 +267,7 @@ class SNMPv3Client:
             logger.error(f"Exception during WALK: {e}")
             return {}
     
-    def get_system_info(self) -> Dict[str, str]:
+    async def get_system_info(self) -> Dict[str, str]:
         """
         Get basic system information from device.
         
@@ -281,12 +286,12 @@ class SNMPv3Client:
         
         info = {}
         for key, oid in system_oids.items():
-            value = self.get(oid)
+            value = await self.get(oid)
             info[key] = str(value) if value else "N/A"
         
         return info
     
-    def get_interfaces(self) -> Dict[int, Dict[str, Any]]:
+    async def get_interfaces(self) -> Dict[int, Dict[str, Any]]:
         """
         Get network interfaces information.
         
@@ -296,7 +301,7 @@ class SNMPv3Client:
         interfaces = {}
         
         # Get interface count
-        num_interfaces_value = self.get('1.3.6.1.2.1.2.1.0')
+        num_interfaces_value = await self.get('1.3.6.1.2.1.2.1.0')
         try:
             num_interfaces = int(str(num_interfaces_value))
         except:
@@ -308,12 +313,12 @@ class SNMPv3Client:
         # Get interface details
         for i in range(1, num_interfaces + 1):
             interfaces[i] = {
-                'name': self.get(f'1.3.6.1.2.1.2.2.1.2.{i}'),
-                'type': self.get(f'1.3.6.1.2.1.2.2.1.3.{i}'),
-                'mtu': self.get(f'1.3.6.1.2.1.2.2.1.4.{i}'),
-                'speed': self.get(f'1.3.6.1.2.1.2.2.1.5.{i}'),
-                'admin_status': self.get(f'1.3.6.1.2.1.2.2.1.7.{i}'),
-                'oper_status': self.get(f'1.3.6.1.2.1.2.2.1.8.{i}'),
+                'name': await self.get(f'1.3.6.1.2.1.2.2.1.2.{i}'),
+                'type': await self.get(f'1.3.6.1.2.1.2.2.1.3.{i}'),
+                'mtu': await self.get(f'1.3.6.1.2.1.2.2.1.4.{i}'),
+                'speed': await self.get(f'1.3.6.1.2.1.2.2.1.5.{i}'),
+                'admin_status': await self.get(f'1.3.6.1.2.1.2.2.1.7.{i}'),
+                'oper_status': await self.get(f'1.3.6.1.2.1.2.2.1.8.{i}'),
             }
         
         return interfaces
@@ -328,7 +333,7 @@ class SNMPv3Client:
             logger.warning(f"Error closing SNMP session: {e}")
 
 
-if __name__ == "__main__":
+async def main():
     # Example usage
     from config.snmp_config import create_snmpv3_from_config, SNMPTarget
     
@@ -346,13 +351,13 @@ if __name__ == "__main__":
         
         # Get system info
         print("\nGetting system information...")
-        info = client.get_system_info()
+        info = await client.get_system_info()
         for key, value in info.items():
             print(f"  {key}: {value}")
         
         # Get interfaces
         print("\nGetting interfaces...")
-        interfaces = client.get_interfaces()
+        interfaces = await client.get_interfaces()
         for idx, iface_info in interfaces.items():
             print(f"  Interface {idx}: {iface_info['name']}")
         
@@ -362,3 +367,7 @@ if __name__ == "__main__":
         print(f"Error: {e}")
         import traceback
         traceback.print_exc()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
