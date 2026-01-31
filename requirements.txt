@@ -1,7 +1,5 @@
-# Core SNMP Library (IMPORTANT: Use pysnmp, not pysnmp-lextudio)
-pysnmp==4.4.12
-pyasn1==0.4.8
-pyasn1-modules==0.2.8
+# Core SNMP Library - Python 3.14 compatible
+pysnmp>=5.0.0
 
 # Network & HTTP
 requests>=2.31.0
