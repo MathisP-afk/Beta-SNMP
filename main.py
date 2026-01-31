@@ -11,7 +11,7 @@ Usage:
     python main.py snmp --target cisco_sg250 --interfaces
     python main.py snmp --list-targets
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
-    python main.py api --url https://api.example.com --endpoint /api/devices --get
+    python main.py api --url https://192.168.1.15 --health --insecure --api-key vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_
 """
 
 import argparse
@@ -136,12 +136,14 @@ def main_api(args):
             print("\n⚠️  Starting API client in INSECURE mode (testing/development only)")
             api_client = create_insecure_client(
                 args.url,
+                api_key=args.api_key,
                 timeout=args.timeout,
                 max_retries=args.retries,
             )
         else:
             api_client = HTTPSAPIClient(
                 args.url,
+                api_key=args.api_key,
                 insecure=False,
                 timeout=args.timeout,
                 max_retries=args.retries,
@@ -243,6 +245,7 @@ Examples:
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
   
   API Operations:
+    python main.py api --url https://192.168.1.15 --health --insecure --api-key YOUR_KEY
     python main.py api --url https://api.example.com --endpoint /devices --get --insecure
     python main.py api --url https://api.example.com --endpoint /devices --post --data '{"name": "sw1"}' --insecure
   
@@ -276,10 +279,11 @@ Examples:
     api_group.add_argument("--post", action="store_true", help="Perform POST request")
     api_group.add_argument("--health", action="store_true", help="Check API health")
     
-    api_parser.add_argument("--url", metavar="URL", help="API base URL")
+    api_parser.add_argument("--url", metavar="URL", help="API base URL (e.g., https://192.168.1.15)")
     api_parser.add_argument("--endpoint", metavar="PATH", help="API endpoint (default: /)")
     api_parser.add_argument("--data", metavar="JSON", help="POST data as JSON")
     api_parser.add_argument("--params", metavar="JSON", help="GET parameters as JSON")
+    api_parser.add_argument("--api-key", metavar="KEY", help="API key for authentication")
     api_parser.add_argument(
         "--insecure",
         action="store_true",
