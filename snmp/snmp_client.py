@@ -5,10 +5,8 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 """
 
 from typing import Optional, List, Dict, Any
-from pysnmp.smi import builder, view
-from pysnmp.hlapi import *
-from pysnmp.proto import rfc1155, rfc1902
 import logging
+from pysnmp.hlapi import *
 from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
 
@@ -59,20 +57,20 @@ class SNMPv3Client:
             raise ValueError("SNMPv3 credentials required")
         
         # Map auth protocol
-        auth_proto = usmHMACSHAAuthProtocol
+        auth_proto = usmHMACSHAAuthProtocol()
         if "MD5" in creds.auth_protocol.value:
-            auth_proto = usmHMACMD5AuthProtocol
+            auth_proto = usmHMACMD5AuthProtocol()
         
         # Map privacy protocol  
-        priv_proto = usmAesCfb128Protocol
+        priv_proto = usmAesCfb128Protocol()
         if "DES" in creds.priv_protocol.value:
-            priv_proto = usmDesProtocol
+            priv_proto = usmDesProtocol()
         elif "AES128" in creds.priv_protocol.value:
-            priv_proto = usmAesCfb128Protocol
+            priv_proto = usmAesCfb128Protocol()
         elif "AES192" in creds.priv_protocol.value:
-            priv_proto = usmAesCfb192Protocol
+            priv_proto = usmAesCfb192Protocol()
         elif "AES256" in creds.priv_protocol.value:
-            priv_proto = usmAesCfb256Protocol
+            priv_proto = usmAesCfb256Protocol()
         
         # Create user data with credentials
         try:
