@@ -81,13 +81,23 @@ class HTTPSAPIClient:
         # Setup session with retry strategy
         self.session = requests.Session()
         
-        # Configure retries
-        retry_strategy = Retry(
-            total=max_retries,
-            status_forcelist=[429, 500, 502, 503, 504],
-            method_whitelist=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"],
-            backoff_factor=backoff_factor,
-        )
+        # Configure retries - compatible with urllib3 2.x
+        try:
+            # Try urllib3 2.x+ syntax first
+            retry_strategy = Retry(
+                total=max_retries,
+                status_forcelist=[429, 500, 502, 503, 504],
+                allowed_methods=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"],
+                backoff_factor=backoff_factor,
+            )
+        except TypeError:
+            # Fallback to urllib3 1.x syntax
+            retry_strategy = Retry(
+                total=max_retries,
+                status_forcelist=[429, 500, 502, 503, 504],
+                method_whitelist=["HEAD", "GET", "OPTIONS", "POST", "PUT", "DELETE"],
+                backoff_factor=backoff_factor,
+            )
         
         adapter = HTTPAdapter(max_retries=retry_strategy)
         self.session.mount("https://", adapter)
