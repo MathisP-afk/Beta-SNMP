@@ -1,7 +1,7 @@
 """
 HTTPS API client for communicating with REST APIs.
 Supports insecure mode for self-signed certificates (testing environment).
-Supports API key authentication via headers.
+Supports API key authentication via headers (Bearer token or custom headers).
 """
 
 import requests
@@ -36,7 +36,8 @@ class HTTPSAPIClient:
     HTTPS API client with support for:
     - Standard HTTPS with certificate verification
     - Insecure mode with disabled SSL verification (for testing)
-    - API key authentication via headers
+    - Bearer token authentication (Authorization: Bearer <token>)
+    - API key authentication via custom headers
     - Automatic retry on connection failures
     - Session persistence
     
@@ -52,7 +53,7 @@ class HTTPSAPIClient:
         self,
         base_url: str,
         api_key: Optional[str] = None,
-        api_key_header: str = "X-API-Key",
+        auth_type: str = "bearer",  # "bearer", "api_key", or custom header name
         insecure: bool = False,
         verify_ssl: bool = True,
         timeout: int = 10,
@@ -66,7 +67,7 @@ class HTTPSAPIClient:
         Args:
             base_url: Base URL of the API (e.g., "https://api.example.com")
             api_key: Optional API key for authentication
-            api_key_header: Header name for API key (default: "X-API-Key")
+            auth_type: Type of authentication - "bearer" (default) or header name
             insecure: If True, disable SSL certificate verification (TESTING ONLY!)
             verify_ssl: If True, verify SSL certificates (ignored if insecure=True)
             timeout: Request timeout in seconds
@@ -127,10 +128,19 @@ class HTTPSAPIClient:
         
         # Add API key if provided
         if api_key:
-            self.session.headers.update({
-                api_key_header: api_key
-            })
-            logger.info(f"✓ API key authentication configured ({api_key_header})")
+            if auth_type.lower() == "bearer":
+                # Standard Bearer token (Authorization: Bearer <token>)
+                self.session.headers.update({
+                    'Authorization': f'Bearer {api_key}'
+                })
+                logger.info("✓ Bearer token authentication configured")
+            else:
+                # Custom header (default X-API-Key)
+                header_name = auth_type if auth_type != "api_key" else "X-API-Key"
+                self.session.headers.update({
+                    header_name: api_key
+                })
+                logger.info(f"✓ API key authentication configured ({header_name})")
         
         # Add custom headers if provided
         if custom_headers:
@@ -377,6 +387,7 @@ class HTTPSAPIClient:
 def create_insecure_client(
     base_url: str,
     api_key: Optional[str] = None,
+    auth_type: str = "bearer",
     **kwargs
 ) -> HTTPSAPIClient:
     """
@@ -399,35 +410,31 @@ def create_insecure_client(
         "\n" +
         "="*60 + "\n"
     )
-    return HTTPSAPIClient(base_url, api_key=api_key, insecure=True, **kwargs)
+    return HTTPSAPIClient(
+        base_url,
+        api_key=api_key,
+        auth_type=auth_type,
+        insecure=True,
+        **kwargs
+    )
 
 
 if __name__ == "__main__":
     # Example usage - TESTING ONLY
     import os
     
-    # Example with insecure mode (self-signed certificate) + API key
+    # Example with insecure mode (self-signed certificate) + Bearer token
     api_key = "vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_"
     api_client = create_insecure_client(
-        "https://192.168.1.15",
+        "http://192.168.1.15:8000",
         api_key=api_key,
+        auth_type="bearer",
         timeout=10,
         max_retries=3
     )
     
     # Example GET request
-    # result = api_client.get("/api/devices")
-    # print("Devices:", result)
-    
-    # Example POST request
-    # result = api_client.post(
-    #     "/api/devices",
-    #     json_data={
-    #         "name": "switch01",
-    #         "ip": "192.168.1.28",
-    #         "model": "SG250-08"
-    #     }
-    # )
-    # print("Created:", result)
+    # result = api_client.get("/snmp/list")
+    # print("Packets:", result)
     
     api_client.close()
