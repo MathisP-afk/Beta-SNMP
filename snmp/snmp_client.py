@@ -1,9 +1,10 @@
 """
 SNMPv3 client for secure communication with network devices.
 Supports authentication and privacy encryption.
+Updated for pysnmp 5.x compatibility with Python 3.14+
 """
 
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 from pysnmp.hlapi import (
     getCmd, setCmd, bulkCmd,
     SnmpEngine, UsmUserData,
@@ -13,7 +14,6 @@ from pysnmp.hlapi import (
     ObjectType, ObjectIdentity,
     Integer,
 )
-from pysnmp.proto import rfc1902
 import logging
 from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
@@ -35,6 +35,7 @@ if not logger.handlers:
 class SNMPv3Client:
     """
     SNMPv3 client for querying and managing SNMP devices.
+    Compatible with pysnmp 5.x and Python 3.14+
     
     Features:
     - SNMPv3 with authentication (MD5, SHA) and privacy (DES, AES)
@@ -73,19 +74,23 @@ class SNMPv3Client:
         if "DES" in creds.priv_protocol.value:
             priv_proto = usmDesProtocol
         
-        # Create user data
-        self.user_data = UsmUserData(
-            userName=creds.username,
-            authKey=creds.auth_password,
-            privKey=creds.priv_password,
-            authProtocol=auth_proto,
-            privProtocol=priv_proto,
-        )
-        
-        logger.debug(
-            f"SNMPv3 user '{creds.username}' configured with "
-            f"{creds.auth_protocol.value} + {creds.priv_protocol.value}"
-        )
+        # Create user data with credentials
+        try:
+            self.user_data = UsmUserData(
+                userName=creds.username,
+                authKey=creds.auth_password,
+                privKey=creds.priv_password,
+                authProtocol=auth_proto,
+                privProtocol=priv_proto,
+            )
+            
+            logger.debug(
+                f"SNMPv3 user '{creds.username}' configured with "
+                f"{creds.auth_protocol.value} + {creds.priv_protocol.value}"
+            )
+        except Exception as e:
+            logger.error(f"Failed to setup SNMPv3 user data: {e}")
+            raise
     
     def _setup_transport(self) -> None:
         """
@@ -311,8 +316,11 @@ class SNMPv3Client:
         """
         Close SNMP session and clean up resources.
         """
-        self.engine.closeDispatcher()
-        logger.info(f"SNMP session closed for {self.target.ip_address}")
+        try:
+            self.engine.closeDispatcher()
+            logger.info(f"SNMP session closed for {self.target.ip_address}")
+        except Exception as e:
+            logger.warning(f"Error closing SNMP session: {e}")
 
 
 if __name__ == "__main__":
@@ -347,3 +355,5 @@ if __name__ == "__main__":
     
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
