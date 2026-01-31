@@ -1,5 +1,9 @@
-# Core Dependencies
-python-snmp[crypto]>=4.4.12
+# Core SNMP Library (IMPORTANT: Use pysnmp, not pysnmp-lextudio)
+pysnmp==4.4.12
+pyasn1==0.4.8
+pyasn1-modules==0.2.8
+
+# Network & HTTP
 requests>=2.31.0
 urllib3>=2.1.0
 
@@ -7,15 +11,15 @@ urllib3>=2.1.0
 pandas>=2.1.0
 numpy>=1.24.0
 
+# Security & Cryptography
+cryptography>=41.0.0
+
 # Database (for future use)
 sqlalchemy>=2.0.0
 psycopg2-binary>=2.9.0
 
 # GUI (from existing project)
 flet>=0.21.0
-
-# Security & Cryptography
-cryptography>=41.0.0
 
 # Testing
 pytest>=7.4.0
