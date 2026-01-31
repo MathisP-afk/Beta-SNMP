@@ -1,6 +1,7 @@
 """
 HTTPS API client for communicating with REST APIs.
 Supports insecure mode for self-signed certificates (testing environment).
+Supports API key authentication via headers.
 """
 
 import requests
@@ -35,6 +36,7 @@ class HTTPSAPIClient:
     HTTPS API client with support for:
     - Standard HTTPS with certificate verification
     - Insecure mode with disabled SSL verification (for testing)
+    - API key authentication via headers
     - Automatic retry on connection failures
     - Session persistence
     
@@ -49,22 +51,28 @@ class HTTPSAPIClient:
     def __init__(
         self,
         base_url: str,
+        api_key: Optional[str] = None,
+        api_key_header: str = "X-API-Key",
         insecure: bool = False,
         verify_ssl: bool = True,
         timeout: int = 10,
         max_retries: int = 3,
         backoff_factor: float = 0.3,
+        custom_headers: Optional[Dict[str, str]] = None,
     ):
         """
         Initialize HTTPS API client.
         
         Args:
             base_url: Base URL of the API (e.g., "https://api.example.com")
+            api_key: Optional API key for authentication
+            api_key_header: Header name for API key (default: "X-API-Key")
             insecure: If True, disable SSL certificate verification (TESTING ONLY!)
             verify_ssl: If True, verify SSL certificates (ignored if insecure=True)
             timeout: Request timeout in seconds
             max_retries: Number of retry attempts
             backoff_factor: Backoff factor for retries
+            custom_headers: Additional custom headers to add to all requests
         """
         self.base_url = base_url.rstrip('/')
         self.timeout = timeout
@@ -106,6 +114,18 @@ class HTTPSAPIClient:
             'User-Agent': 'Beta-SNMP/1.0',
             'Accept': 'application/json',
         })
+        
+        # Add API key if provided
+        if api_key:
+            self.session.headers.update({
+                api_key_header: api_key
+            })
+            logger.info(f"✓ API key authentication configured ({api_key_header})")
+        
+        # Add custom headers if provided
+        if custom_headers:
+            self.session.headers.update(custom_headers)
+            logger.info(f"✓ Added {len(custom_headers)} custom header(s)")
         
         logger.info(f"API Client initialized: {self.base_url}")
     
@@ -346,6 +366,7 @@ class HTTPSAPIClient:
 # Helper function for creating insecure client (testing only)
 def create_insecure_client(
     base_url: str,
+    api_key: Optional[str] = None,
     **kwargs
 ) -> HTTPSAPIClient:
     """
@@ -368,16 +389,18 @@ def create_insecure_client(
         "\n" +
         "="*60 + "\n"
     )
-    return HTTPSAPIClient(base_url, insecure=True, **kwargs)
+    return HTTPSAPIClient(base_url, api_key=api_key, insecure=True, **kwargs)
 
 
 if __name__ == "__main__":
     # Example usage - TESTING ONLY
     import os
     
-    # Example with insecure mode (self-signed certificate)
+    # Example with insecure mode (self-signed certificate) + API key
+    api_key = "vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_"
     api_client = create_insecure_client(
-        "https://api.example.com",
+        "https://192.168.1.15",
+        api_key=api_key,
         timeout=10,
         max_retries=3
     )
