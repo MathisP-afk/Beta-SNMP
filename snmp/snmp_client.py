@@ -6,7 +6,16 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 import logging
-from pysnmp.hlapi.v3arch import (\n    SnmpEngine, UsmUserData, ContextData, ObjectType, ObjectIdentity,\n    getCmd, setCmd, bulkCmd,\n    USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5,\n    USM_PRIV_CFB128_AES, USM_PRIV_CFB192_AES, USM_PRIV_CFB256_AES,\n    USM_PRIV_CBC56_DES,\n    UdpTransportTarget,\n    Integer\n)\nfrom config.snmp_config import SNMPTarget, SNMPv3Credentials
+from pysnmp.hlapi.v3arch import (
+    SnmpEngine, UsmUserData, ContextData, ObjectType, ObjectIdentity,
+    getCmd, setCmd, bulkCmd,
+    USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5,
+    USM_PRIV_CFB128_AES, USM_PRIV_CFB192_AES, USM_PRIV_CFB256_AES,
+    USM_PRIV_CBC56_DES,
+    UdpTransportTarget,
+    Integer
+)
+from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
 
 # Setup logging
