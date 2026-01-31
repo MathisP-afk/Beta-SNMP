@@ -6,9 +6,7 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 import logging
-from pysnmp.smi import builder, view
-from pysnmp import hlapi
-from config.snmp_config import SNMPTarget, SNMPv3Credentials
+from pysnmp.hlapi.v3arch import (\n    SnmpEngine, UsmUserData, ContextData, ObjectType, ObjectIdentity,\n    getCmd, setCmd, bulkCmd,\n    USM_AUTH_HMAC96_SHA, USM_AUTH_HMAC96_MD5,\n    USM_PRIV_CFB128_AES, USM_PRIV_CFB192_AES, USM_PRIV_CFB256_AES,\n    USM_PRIV_CBC56_DES,\n    UdpTransportTarget,\n    Integer\n)\nfrom config.snmp_config import SNMPTarget, SNMPv3Credentials
 
 
 # Setup logging
@@ -58,24 +56,24 @@ class SNMPv3Client:
             raise ValueError("SNMPv3 credentials required")
         
         # Map auth protocol
-        auth_proto = hlapi.usmHMACSHAAuthProtocol
+        auth_proto = USM_AUTH_HMAC96_SHA
         if "MD5" in creds.auth_protocol.value:
-            auth_proto = hlapi.usmHMACMD5AuthProtocol
+            auth_proto = USM_AUTH_HMAC96_MD5
         
         # Map privacy protocol  
-        priv_proto = hlapi.usmAesCfb128Protocol
+        priv_proto = USM_PRIV_CFB128_AES
         if "DES" in creds.priv_protocol.value:
-            priv_proto = hlapi.usmDesProtocol
+            priv_proto = USM_PRIV_CBC56_DES
         elif "AES128" in creds.priv_protocol.value:
-            priv_proto = hlapi.usmAesCfb128Protocol
+            priv_proto = USM_PRIV_CFB128_AES
         elif "AES192" in creds.priv_protocol.value:
-            priv_proto = hlapi.usmAesCfb192Protocol
+            priv_proto = USM_PRIV_CFB192_AES
         elif "AES256" in creds.priv_protocol.value:
-            priv_proto = hlapi.usmAesCfb256Protocol
+            priv_proto = USM_PRIV_CFB256_AES
         
         # Create user data with credentials
         try:
-            self.user_data = hlapi.UsmUserData(
+            self.user_data = UsmUserData(
                 userName=creds.username,
                 authKey=creds.auth_password,
                 privKey=creds.priv_password,
@@ -95,7 +93,7 @@ class SNMPv3Client:
         """
         Setup UDP transport target.
         """
-        self.transport_target = hlapi.UdpTransportTarget(
+        self.transport_target = UdpTransportTarget(
             hostName=self.target.ip_address,
             port=self.target.port,
             timeout=self.target.timeout,
@@ -118,12 +116,12 @@ class SNMPv3Client:
             Value or None if error
         """
         try:
-            iterator = hlapi.getCmd(
-                hlapi.SnmpEngine(),
+            iterator = getCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -180,14 +178,14 @@ class SNMPv3Client:
             # Determine value type
             snmp_value = value
             if value_type == 'integer' or isinstance(value, int):
-                snmp_value = hlapi.Integer(value)
+                snmp_value = Integer(value)
             
-            iterator = hlapi.setCmd(
-                hlapi.SnmpEngine(),
+            iterator = setCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid), snmp_value),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid), snmp_value),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -222,13 +220,13 @@ class SNMPv3Client:
         """
         results = {}
         try:
-            iterator = hlapi.bulkCmd(
-                hlapi.SnmpEngine(),
+            iterator = bulkCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
+                ContextData(),
                 0, 25,  # nonRepeaters, maxRepetitions
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
+                ObjectType(ObjectIdentity(oid)),
             )
             
             for error_indication, error_status, error_index, var_binds in iterator:
