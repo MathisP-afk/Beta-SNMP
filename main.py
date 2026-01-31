@@ -11,7 +11,7 @@ Usage:
     python main.py snmp --target cisco_sg250 --interfaces
     python main.py snmp --list-targets
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
-    python main.py api --url https://192.168.1.15 --health --insecure --api-key vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_
+    python main.py api --url http://192.168.1.15:8000 --health --api-key vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_
 """
 
 import argparse
@@ -131,14 +131,18 @@ def main_api(args):
     api_client = None
     
     try:
-        # Determine if we should use insecure mode
-        insecure = args.insecure or "https" in args.url
+        # Determine authentication type
+        auth_type = args.auth_type or "bearer"
         
-        if insecure and args.insecure:
+        # Determine if we should use insecure mode
+        insecure = args.insecure
+        
+        if insecure:
             print("\n⚠️  Starting API client in INSECURE mode (testing/development only)")
             api_client = create_insecure_client(
                 args.url,
                 api_key=args.api_key,
+                auth_type=auth_type,
                 timeout=args.timeout,
                 max_retries=args.retries,
             )
@@ -146,6 +150,7 @@ def main_api(args):
             api_client = HTTPSAPIClient(
                 args.url,
                 api_key=args.api_key,
+                auth_type=auth_type,
                 insecure=False,
                 timeout=args.timeout,
                 max_retries=args.retries,
@@ -250,9 +255,9 @@ Examples:
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
   
   API Operations:
-    python main.py api --url https://192.168.1.15 --health --insecure --api-key YOUR_KEY
-    python main.py api --url https://api.example.com --endpoint /devices --get --insecure
-    python main.py api --url https://api.example.com --endpoint /devices --post --data '{"name": "sw1"}' --insecure
+    python main.py api --url http://192.168.1.15:8000 --health --api-key YOUR_KEY
+    python main.py api --url https://api.example.com --endpoint /devices --get --insecure --api-key YOUR_KEY
+    python main.py api --url https://api.example.com --endpoint /devices --post --data '{"name": "sw1"}' --insecure --api-key YOUR_KEY
   
   Configuration:
     python main.py config --add myswitch 192.168.1.100
@@ -284,11 +289,17 @@ Examples:
     api_group.add_argument("--post", action="store_true", help="Perform POST request")
     api_group.add_argument("--health", action="store_true", help="Check API health")
     
-    api_parser.add_argument("--url", metavar="URL", help="API base URL (e.g., https://192.168.1.15)")
+    api_parser.add_argument("--url", metavar="URL", help="API base URL (e.g., http://192.168.1.15:8000)")
     api_parser.add_argument("--endpoint", metavar="PATH", help="API endpoint (default: /)")
     api_parser.add_argument("--data", metavar="JSON", help="POST data as JSON")
     api_parser.add_argument("--params", metavar="JSON", help="GET parameters as JSON")
     api_parser.add_argument("--api-key", metavar="KEY", help="API key for authentication")
+    api_parser.add_argument(
+        "--auth-type",
+        metavar="TYPE",
+        default="bearer",
+        help="Authentication type: 'bearer' (default), 'api_key', or custom header name"
+    )
     api_parser.add_argument(
         "--insecure",
         action="store_true",
