@@ -11,7 +11,7 @@ Usage:
     python main.py snmp --target cisco_sg250 --interfaces
     python main.py snmp --list-targets
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
-    python main.py api --url http://192.168.1.15:8000 --health --api-key vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_
+    python main.py api --url https://192.168.1.15:8000 --health --insecure --api-key vp1p-s8_iq-W08ZR5Wt9U6PYvwVGmWjwbzTLE4NsT1RoiY6bJzgFgfhrzcCkmRl_
 """
 
 import argparse
@@ -254,9 +254,9 @@ Examples:
     python main.py snmp --list-targets
     python main.py snmp --update-ip cisco_sg250 192.168.1.50
   
-  API Operations:
-    python main.py api --url http://192.168.1.15:8000 --health --api-key YOUR_KEY
-    python main.py api --url https://api.example.com --endpoint /devices --get --insecure --api-key YOUR_KEY
+  API Operations (with HTTPS + self-signed certificate):
+    python main.py api --url https://192.168.1.15:8000 --health --insecure --api-key YOUR_KEY
+    python main.py api --url https://192.168.1.15:8000 --endpoint /snmp/list --get --insecure --api-key YOUR_KEY
     python main.py api --url https://api.example.com --endpoint /devices --post --data '{"name": "sw1"}' --insecure --api-key YOUR_KEY
   
   Configuration:
@@ -289,7 +289,7 @@ Examples:
     api_group.add_argument("--post", action="store_true", help="Perform POST request")
     api_group.add_argument("--health", action="store_true", help="Check API health")
     
-    api_parser.add_argument("--url", metavar="URL", help="API base URL (e.g., http://192.168.1.15:8000)")
+    api_parser.add_argument("--url", metavar="URL", help="API base URL (e.g., https://192.168.1.15:8000)")
     api_parser.add_argument("--endpoint", metavar="PATH", help="API endpoint (default: /)")
     api_parser.add_argument("--data", metavar="JSON", help="POST data as JSON")
     api_parser.add_argument("--params", metavar="JSON", help="GET parameters as JSON")
@@ -303,7 +303,7 @@ Examples:
     api_parser.add_argument(
         "--insecure",
         action="store_true",
-        help="Disable SSL verification (TESTING ONLY!)"
+        help="Disable SSL verification (for self-signed certificates in development)"
     )
     api_parser.add_argument("--timeout", type=int, default=10, help="Request timeout (default: 10s)")
     api_parser.add_argument("--retries", type=int, default=3, help="Retry attempts (default: 3)")
