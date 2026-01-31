@@ -128,10 +128,12 @@ def main_api(args):
         print("Error: --url is required for API operations")
         return 1
     
-    # Determine if we should use insecure mode
-    insecure = args.insecure or "https" in args.url
+    api_client = None
     
     try:
+        # Determine if we should use insecure mode
+        insecure = args.insecure or "https" in args.url
+        
         if insecure and args.insecure:
             print("\n⚠️  Starting API client in INSECURE mode (testing/development only)")
             api_client = create_insecure_client(
@@ -190,9 +192,12 @@ def main_api(args):
     
     except Exception as e:
         print(f"Error: {e}")
+        import traceback
+        traceback.print_exc()
         return 1
     finally:
-        api_client.close()
+        if api_client:
+            api_client.close()
 
 
 def main_config(args):
