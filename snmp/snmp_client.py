@@ -6,7 +6,7 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 import logging
-from pysnmp.hlapi.v3arch import (
+from pysnmp.hlapi import (
     SnmpEngine, UsmUserData, ContextData, ObjectType, ObjectIdentity,
     getCmd, setCmd, bulkCmd,
     usmHMACSHAAuthProtocol, usmHMACMD5AuthProtocol,
