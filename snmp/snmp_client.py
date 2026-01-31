@@ -1,11 +1,12 @@
 """
 SNMPv3 client for secure communication with network devices.
 Supports authentication and privacy encryption.
-Updated for pysnmp 5.x compatibility with Python 3.14+
+Updated for pysnmp 7.x modern API with Python 3.14+ support.
 """
 
 from typing import Optional, List, Dict, Any
-from pysnmp.hlapi import (
+from pysnmp.smi import builder, view
+from pysnmp.hlapi.v1 import (
     getCmd, setCmd, bulkCmd,
     SnmpEngine, UsmUserData,
     usmHMACSHAAuthProtocol, usmHMACMD5AuthProtocol,
@@ -35,7 +36,7 @@ if not logger.handlers:
 class SNMPv3Client:
     """
     SNMPv3 client for querying and managing SNMP devices.
-    Compatible with pysnmp 5.x and Python 3.14+
+    Compatible with pysnmp 7.x and Python 3.14+
     
     Features:
     - SNMPv3 with authentication (MD5, SHA) and privacy (DES, AES)
@@ -55,6 +56,7 @@ class SNMPv3Client:
         self.engine = SnmpEngine()
         self._setup_user_data()
         self._setup_transport()
+        logger.info(f"SNMPv3 client initialized for {target.ip_address}")
     
     def _setup_user_data(self) -> None:
         """
@@ -69,7 +71,7 @@ class SNMPv3Client:
         if "MD5" in creds.auth_protocol.value:
             auth_proto = usmHMACMD5AuthProtocol
         
-        # Map privacy protocol
+        # Map privacy protocol  
         priv_proto = usmAesCfb128Protocol
         if "DES" in creds.priv_protocol.value:
             priv_proto = usmDesProtocol
