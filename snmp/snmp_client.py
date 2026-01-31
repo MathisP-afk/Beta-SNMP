@@ -6,7 +6,8 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 from pysnmp.smi import builder, view
-from pysnmp import hlapi
+from pysnmp.hlapi import *
+from pysnmp.proto import rfc1155, rfc1902
 import logging
 from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
@@ -45,7 +46,6 @@ class SNMPv3Client:
             target: SNMPTarget instance with credentials and connection params
         """
         self.target = target
-        self.engine = hlapi.SnmpEngine()
         self._setup_user_data()
         self._setup_transport()
         logger.info(f"SNMPv3 client initialized for {target.ip_address}")
@@ -59,18 +59,24 @@ class SNMPv3Client:
             raise ValueError("SNMPv3 credentials required")
         
         # Map auth protocol
-        auth_proto = hlapi.usmHMACSHAAuthProtocol
+        auth_proto = usmHMACSHAAuthProtocol
         if "MD5" in creds.auth_protocol.value:
-            auth_proto = hlapi.usmHMACMD5AuthProtocol
+            auth_proto = usmHMACMD5AuthProtocol
         
         # Map privacy protocol  
-        priv_proto = hlapi.usmAesCfb128Protocol
+        priv_proto = usmAesCfb128Protocol
         if "DES" in creds.priv_protocol.value:
-            priv_proto = hlapi.usmDesProtocol
+            priv_proto = usmDesProtocol
+        elif "AES128" in creds.priv_protocol.value:
+            priv_proto = usmAesCfb128Protocol
+        elif "AES192" in creds.priv_protocol.value:
+            priv_proto = usmAesCfb192Protocol
+        elif "AES256" in creds.priv_protocol.value:
+            priv_proto = usmAesCfb256Protocol
         
         # Create user data with credentials
         try:
-            self.user_data = hlapi.UsmUserData(
+            self.user_data = UsmUserData(
                 userName=creds.username,
                 authKey=creds.auth_password,
                 privKey=creds.priv_password,
@@ -90,7 +96,7 @@ class SNMPv3Client:
         """
         Setup UDP transport target.
         """
-        self.transport_target = hlapi.UdpTransportTarget(
+        self.transport_target = UdpTransportTarget(
             hostName=self.target.ip_address,
             port=self.target.port,
             timeout=self.target.timeout,
@@ -113,12 +119,12 @@ class SNMPv3Client:
             Value or None if error
         """
         try:
-            iterator = hlapi.getCmd(
-                self.engine,
+            iterator = getCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid)),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -175,14 +181,14 @@ class SNMPv3Client:
             # Determine value type
             snmp_value = value
             if value_type == 'integer' or isinstance(value, int):
-                snmp_value = hlapi.Integer(value)
+                snmp_value = Integer(value)
             
-            iterator = hlapi.setCmd(
-                self.engine,
+            iterator = setCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid), snmp_value),
+                ContextData(),
+                ObjectType(ObjectIdentity(oid), snmp_value),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -217,13 +223,13 @@ class SNMPv3Client:
         """
         results = {}
         try:
-            iterator = hlapi.bulkCmd(
-                self.engine,
+            iterator = bulkCmd(
+                SnmpEngine(),
                 self.user_data,
                 self.transport_target,
-                hlapi.ContextData(),
+                ContextData(),
                 0, 25,  # nonRepeaters, maxRepetitions
-                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
+                ObjectType(ObjectIdentity(oid)),
             )
             
             for error_indication, error_status, error_index, var_binds in iterator:
@@ -311,7 +317,6 @@ class SNMPv3Client:
         Close SNMP session and clean up resources.
         """
         try:
-            self.engine.closeDispatcher()
             logger.info(f"SNMP session closed for {self.target.ip_address}")
         except Exception as e:
             logger.warning(f"Error closing SNMP session: {e}")
