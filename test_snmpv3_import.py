@@ -11,7 +11,7 @@ creds = SNMPv3Credentials(
     username='test_user',
     auth_protocol=AuthProtocol.SHA,
     auth_password='auth_pass_12345',
-    priv_protocol=PrivProtocol.AES,
+    priv_protocol=PrivProtocol.AES128,
     priv_password='priv_pass_12345'
 )
 
