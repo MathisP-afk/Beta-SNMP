@@ -1,0 +1,21 @@
+{
+  "targets": [
+    {
+      "name": "cisco_sg250",
+      "ip_address": "192.168.1.28",
+      "port": 161,
+      "version": "v3",
+      "credentials": {
+        "username": "Alleria_W",
+        "auth_password": "Vereesa_W",
+        "auth_protocol": "SHA",
+        "priv_password": "Windrunner",
+        "priv_protocol": "AES128",
+        "engine_boots": 0,
+        "engine_time": 0
+      },
+      "timeout": 5,
+      "retries": 3
+    }
+  ]
+}
