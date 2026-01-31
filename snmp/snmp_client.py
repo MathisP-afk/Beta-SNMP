@@ -6,15 +6,7 @@ Updated for pysnmp 7.x modern API with Python 3.14+ support.
 
 from typing import Optional, List, Dict, Any
 from pysnmp.smi import builder, view
-from pysnmp.hlapi.v1 import (
-    getCmd, setCmd, bulkCmd,
-    SnmpEngine, UsmUserData,
-    usmHMACSHAAuthProtocol, usmHMACMD5AuthProtocol,
-    usmAesCfb128Protocol, usmDesProtocol,
-    UdpTransportTarget, ContextData,
-    ObjectType, ObjectIdentity,
-    Integer,
-)
+from pysnmp import hlapi
 import logging
 from config.snmp_config import SNMPTarget, SNMPv3Credentials
 
@@ -53,7 +45,7 @@ class SNMPv3Client:
             target: SNMPTarget instance with credentials and connection params
         """
         self.target = target
-        self.engine = SnmpEngine()
+        self.engine = hlapi.SnmpEngine()
         self._setup_user_data()
         self._setup_transport()
         logger.info(f"SNMPv3 client initialized for {target.ip_address}")
@@ -67,18 +59,18 @@ class SNMPv3Client:
             raise ValueError("SNMPv3 credentials required")
         
         # Map auth protocol
-        auth_proto = usmHMACSHAAuthProtocol
+        auth_proto = hlapi.usmHMACSHAAuthProtocol
         if "MD5" in creds.auth_protocol.value:
-            auth_proto = usmHMACMD5AuthProtocol
+            auth_proto = hlapi.usmHMACMD5AuthProtocol
         
         # Map privacy protocol  
-        priv_proto = usmAesCfb128Protocol
+        priv_proto = hlapi.usmAesCfb128Protocol
         if "DES" in creds.priv_protocol.value:
-            priv_proto = usmDesProtocol
+            priv_proto = hlapi.usmDesProtocol
         
         # Create user data with credentials
         try:
-            self.user_data = UsmUserData(
+            self.user_data = hlapi.UsmUserData(
                 userName=creds.username,
                 authKey=creds.auth_password,
                 privKey=creds.priv_password,
@@ -98,7 +90,7 @@ class SNMPv3Client:
         """
         Setup UDP transport target.
         """
-        self.transport_target = UdpTransportTarget(
+        self.transport_target = hlapi.UdpTransportTarget(
             hostName=self.target.ip_address,
             port=self.target.port,
             timeout=self.target.timeout,
@@ -121,12 +113,12 @@ class SNMPv3Client:
             Value or None if error
         """
         try:
-            iterator = getCmd(
+            iterator = hlapi.getCmd(
                 self.engine,
                 self.user_data,
                 self.transport_target,
-                ContextData(),
-                ObjectType(ObjectIdentity(oid)),
+                hlapi.ContextData(),
+                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -183,14 +175,14 @@ class SNMPv3Client:
             # Determine value type
             snmp_value = value
             if value_type == 'integer' or isinstance(value, int):
-                snmp_value = Integer(value)
+                snmp_value = hlapi.Integer(value)
             
-            iterator = setCmd(
+            iterator = hlapi.setCmd(
                 self.engine,
                 self.user_data,
                 self.transport_target,
-                ContextData(),
-                ObjectType(ObjectIdentity(oid), snmp_value),
+                hlapi.ContextData(),
+                hlapi.ObjectType(hlapi.ObjectIdentity(oid), snmp_value),
             )
             
             error_indication, error_status, error_index, var_binds = next(iterator)
@@ -225,13 +217,13 @@ class SNMPv3Client:
         """
         results = {}
         try:
-            iterator = bulkCmd(
+            iterator = hlapi.bulkCmd(
                 self.engine,
                 self.user_data,
                 self.transport_target,
-                ContextData(),
+                hlapi.ContextData(),
                 0, 25,  # nonRepeaters, maxRepetitions
-                ObjectType(ObjectIdentity(oid)),
+                hlapi.ObjectType(hlapi.ObjectIdentity(oid)),
             )
             
             for error_indication, error_status, error_index, var_binds in iterator:
