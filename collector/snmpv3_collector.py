@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SNMPv3 Collector - Pure Python avec pysnmp 7.1.22
-Collecte les donnees SNMP d'un switch et les envoie a l'API
-APPROCHE: Utilise asyncio + event loop de pysnmp 7.x
+SNMPv3 Collector - Optimisé pour Python 3.13 + pysnmp 7.1.22
+Collecte les données SNMP d'un device et les affiche en JSON
+API: pysnmp.hlapi.asyncio avec support Python 3.13+
 """
 
 import os
@@ -43,7 +43,7 @@ class SNMPConfig:
 
 
 class SNMPv3Collector:
-    """Collecteur SNMPv3 compatible pysnmp 7.1.22 avec asyncio"""
+    """Collecteur SNMPv3 compatible pysnmp 7.1.22 + Python 3.13"""
     
     # OIDs de base (SNMP MIB-II)
     OIDS = {
@@ -62,16 +62,16 @@ class SNMPv3Collector:
         Args:
             config: Configuration SNMPv3
             mode: Mode TEST ou PRODUCTION
-            verbose: Affichage detaille
+            verbose: Affichage détaillé
         """
         self.config = config
         self.mode = mode
         self.verbose = verbose
         
-        # Verifier que pysnmp est disponible
+        # Vérifier que pysnmp est disponible
         try:
             import pysnmp
-            logger.debug(f"pysnmp {pysnmp.__version__} charge")
+            logger.debug(f"pysnmp {pysnmp.__version__} chargé")
         except ImportError as e:
             logger.error(f"Impossible d'importer pysnmp: {e}")
             raise
@@ -81,97 +81,31 @@ class SNMPv3Collector:
             logger.debug(f"Mode: {mode.value}")
             logger.debug(f"Host: {config.host}:{config.port}")
     
-    async def get_oid_async(self, oid: str) -> Optional[Any]:
-        """Recupere la valeur d'un OID avec asyncio
+    def get_oid_sync(self, oid: str) -> Optional[Any]:
+        """Récupère la valeur d'un OID (synchrone, compatible Python 3.13)
         
         Args:
-            oid: OID a recuperer (ex: "1.3.6.1.2.1.1.5.0")
+            oid: OID à récupérer (ex: "1.3.6.1.2.1.1.5.0")
             
         Returns:
             Valeur de l'OID ou None
         """
         try:
-            # Import dynamique de l'API asyncio de pysnmp 7.x
-            from pysnmp.hlapi.asyncio import (
-                Snmpv3Engine,
-                UsmUserData,
-                UdpTransportTarget,
-                ContextData,
-                ObjectType,
-                ObjectIdentity,
-                getCmd,
-            )
-            
-            # Creer l'utilisateur SNMPv3
-            user_data = UsmUserData(
-                userName=self.config.username,
-                authKey=self.config.auth_password,
-                privKey=self.config.priv_password,
-            )
-            
-            # Configuration de la cible
-            target = UdpTransportTarget(
-                (self.config.host, self.config.port),
-                timeout=self.config.timeout,
-                retries=self.config.retries,
-            )
-            
-            # Contexte SNMP
-            context = ContextData()
-            
-            # Executer le GET (async)
-            errorIndication, errorStatus, errorIndex, varBinds = await getCmd(
-                Snmpv3Engine(),
-                user_data,
-                target,
-                context,
-                ObjectType(ObjectIdentity(oid)),
-            )
-            
-            if errorIndication:
-                if self.verbose:
-                    logger.warning(f"SNMP Error: {errorIndication}")
-                return None
-            
-            if errorStatus:
-                if self.verbose:
-                    logger.warning(f"SNMP Status Error: {errorStatus.prettyPrint()}")
-                return None
-            
-            # Extraire la valeur
-            for varBind in varBinds:
-                oid_recv, value = varBind
-                if self.verbose:
-                    logger.debug(f"Received: {oid_recv} = {value}")
-                return str(value)
-        
-        except ImportError:
-            # Fallback: utiliser l'API synchrone
-            logger.debug("Fallback vers API synchrone")
-            return self.get_oid_sync(oid)
-        
-        except Exception as e:
-            if self.verbose:
-                logger.error(f"Exception lors du GET {oid}: {e}")
-            return None
-    
-    def get_oid_sync(self, oid: str) -> Optional[Any]:
-        """Recupere la valeur d'un OID (synchrone, fallback)"""
-        try:
-            # Import de l'API sync de pysnmp 7.x
+            # Import de l'API sync de pysnmp 7.x (COMPATIBLE PYTHON 3.13)
             from pysnmp.hlapi import (
+                getCmd,
                 SnmpEngine,
                 UsmUserData,
                 UdpTransportTarget,
                 ContextData,
                 ObjectType,
                 ObjectIdentity,
-                getCmd,
             )
             
+            # Créer le moteur SNMP
             snmp_engine = SnmpEngine()
             
-            # Creer l'utilisateur SNMPv3
+            # Créer l'utilisateur SNMPv3
             user_data = UsmUserData(
                 userName=self.config.username,
                 authKey=self.config.auth_password,
@@ -188,7 +122,7 @@ class SNMPv3Collector:
             # Contexte SNMP
             context = ContextData()
             
-            # Executer le GET
+            # Exécuter le GET
             iterator = getCmd(
                 snmp_engine,
                 user_data,
@@ -197,7 +131,7 @@ class SNMPv3Collector:
                 ObjectType(ObjectIdentity(oid)),
             )
             
-            # Recuperer le resultat
+            # Récupérer le résultat
             errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
             
             if errorIndication:
@@ -223,14 +157,14 @@ class SNMPv3Collector:
             return None
     
     def get_oid(self, oid: str) -> Optional[Any]:
-        """Wrapper pour recuperer un OID (synchrone)"""
+        """Wrapper pour récupérer un OID (synchrone)"""
         return self.get_oid_sync(oid)
     
     def collect_system_info(self) -> Dict[str, Any]:
-        """Collecte les informations systeme de base
+        """Collecte les informations système de base
         
         Returns:
-            Dict avec les donnees SNMP
+            Dict avec les données SNMP
         """
         data = {
             "timestamp": time.time(),
@@ -254,7 +188,7 @@ class SNMPv3Collector:
         logger.info(f"Collecte {len(test_oids)} OIDs en mode {self.mode.value}...")
         
         for name, oid in test_oids.items():
-            logger.info(f"  Recuperation {name}...")
+            logger.info(f"  Récupération {name}...")
             value = self.get_oid(oid)
             
             if value:
@@ -262,7 +196,7 @@ class SNMPv3Collector:
                 value_display = value[:50] + "..." if len(str(value)) > 50 else value
                 logger.info(f"    OK: {name} = {value_display}")
             else:
-                logger.warning(f"    ERREUR: Impossible de recuperer {name}")
+                logger.warning(f"    ERREUR: Impossible de récupérer {name}")
         
         return data
     
@@ -272,7 +206,7 @@ class SNMPv3Collector:
         Returns:
             True si la connexion fonctionne
         """
-        logger.info(f"Test de connexion a {self.config.host}:{self.config.port}...")
+        logger.info(f"Test de connexion à {self.config.host}:{self.config.port}...")
         
         result = self.get_oid(self.OIDS["sysDescr"])
         
@@ -286,9 +220,9 @@ class SNMPv3Collector:
 
 
 def main():
-    """Point d'entree du script"""
+    """Point d'entrée du script"""
     parser = argparse.ArgumentParser(
-        description="SNMPv3 Collector - pysnmp 7.1.22",
+        description="SNMPv3 Collector - pysnmp 7.1.22 + Python 3.13",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples:
@@ -307,18 +241,18 @@ Exemples:
         "--mode",
         choices=["test", "production"],
         default="test",
-        help="Mode de fonctionnement (defaut: test)"
+        help="Mode de fonctionnement (défaut: test)"
     )
     parser.add_argument(
         "--host",
         default="127.0.0.1",
-        help="Adresse IP du device (defaut: 127.0.0.1)"
+        help="Adresse IP du device (défaut: 127.0.0.1)"
     )
     parser.add_argument(
         "--port",
         type=int,
         default=161,
-        help="Port SNMP (defaut: 161)"
+        help="Port SNMP (défaut: 161)"
     )
     parser.add_argument(
         "--username",
@@ -338,7 +272,7 @@ Exemples:
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Affichage detaille"
+        help="Affichage détaillé"
     )
     parser.add_argument(
         "--test-only",
@@ -348,7 +282,7 @@ Exemples:
     
     args = parser.parse_args()
     
-    # Creer la configuration
+    # Créer la configuration
     config = SNMPConfig(
         host=args.host,
         port=args.port,
@@ -357,37 +291,37 @@ Exemples:
         priv_password=args.priv_pass,
     )
     
-    # Creer le collecteur
+    # Créer le collecteur
     mode = SNMPMode.TEST if args.mode == "test" else SNMPMode.PRODUCTION
     collector = SNMPv3Collector(config, mode=mode, verbose=args.verbose)
     
-    # Executer
+    # Exécuter
     try:
         if args.test_only:
             # Test de connexion uniquement
             success = collector.test_connection()
             sys.exit(0 if success else 1)
         else:
-            # Collecte complete
+            # Collecte complète
             data = collector.collect_system_info()
             
-            # Afficher les resultats
+            # Afficher les résultats
             print("\n" + "="*70)
             print("RESULTATS DE LA COLLECTE SNMP")
             print("="*70)
             print(json.dumps(data, indent=2))
             print("="*70)
             
-            # Verifier si des donnees ont ete collectees
+            # Vérifier si des données ont été collectées
             if data["results"]:
-                logger.info(f"Collecte reussie: {len(data['results'])} OIDs")
+                logger.info(f"Collecte réussie: {len(data['results'])} OIDs")
                 sys.exit(0)
             else:
-                logger.error("Aucun OID collecte")
+                logger.error("Aucun OID collecté")
                 sys.exit(1)
     
     except KeyboardInterrupt:
-        logger.info("\nArret demande par l'utilisateur")
+        logger.info("\nArrêt demandé par l'utilisateur")
         sys.exit(0)
     except Exception as e:
         logger.error(f"Erreur fatale: {e}")
