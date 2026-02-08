@@ -6,7 +6,7 @@ uvicorn[standard]
 pydantic
 
 # SNMPv3 Manager
-pysnmp>=7.1.20
+pysnmp>=7.1.22
 
 # PostgreSQL Driver
 psycopg2-binary>=2.9
