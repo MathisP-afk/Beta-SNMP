@@ -1,113 +1,158 @@
 # 🔧 TROUBLESHOOTING - Problèmes Courants
 
-## ❌ PowerShell: "n'est pas reconnu" / Activation venv échoue
+## ⚠️ PROBLÈME CRITIQUE: Microsoft Store Python
 
-**Problème:**
-```powershell
-.\venv\Scripts\Activate.ps1 : Le terme «.\venv\Scripts\Activate.ps1» n'est pas reconnu
+Si tu as installé Python depuis **Microsoft Store**, tu vas rencontrer des problèmes de permissions.
+
+**Symptôme:**
+```
+ERROR: Could not install packages due to an OSError: [WinError 5] Accès refusé
+C:\Program Files\WindowsApps\...
 ```
 
-**Solution 1: Changer la Execution Policy (RECOMMANDÉ)**
+**Solution:**
+
+### **Option 1: Installer Python depuis python.org (RECOMMANDÉ)**
+
+1. Désinstalle Python Microsoft Store:
+   - Windows Settings → Apps → Installed apps
+   - Cherche "Python 3.13"
+   - Click "Uninstall"
+
+2. Télécharge Python officiel:
+   - Va sur [python.org](https://www.python.org/downloads/)
+   - Télécharge **Python 3.13** (ou 3.12, 3.11)
+   - **IMPORTANT**: Coche "Add Python to PATH" lors de l'installation
+
+3. Vérifie:
+   ```powershell
+   python --version
+   # Doit afficher: Python 3.13.x (pas microsoft store)
+   
+   python -c "import sys; print(sys.prefix)"
+   # Doit afficher: C:\Users\Mathis\AppData\Local\Programs\Python\Python313
+   # (pas C:\Program Files\WindowsApps\...)
+   ```
+
+4. Réinitialise le venv:
+   ```powershell
+   cd C:\snmp_project\Beta-SNMP
+   
+   # Supprimer l'ancien venv
+   Remove-Item -Recurse -Force venv
+   
+   # Créer un nouveau venv
+   python -m venv venv
+   .\venv\Scripts\Activate.ps1
+   
+   # Installer les dépendances
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   
+   # Vérifier
+   python -c "import pysnmp; print(pysnmp.__version__)"
+   # Doit afficher: 7.1.22
+   ```
+
+---
+
+### **Option 2: Utiliser WSL2 (Windows Subsystem for Linux)**
+
+Si tu préfères rester sur Microsoft Store Python:
+
 ```powershell
-# En tant qu'Admin PowerShell:
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# Installer WSL2
+wsl --install
 
-# Vérifier:
-Get-ExecutionPolicy
-# Résultat: RemoteSigned
+# Puis dans WSL:
+wsl
 
-# Puis activation:
-.\venv\Scripts\Activate.ps1
-# Prompt: (venv) PS C:\snmp_project\Beta-SNMP>
-```
+# Installer Python
+sudo apt update
+sudo apt install python3 python3-venv python3-pip
 
-**Solution 2: Utiliser CMD.exe à la place**
-```cmd
-REM Depuis CMD (pas PowerShell):
-cd C:\snmp_project\Beta-SNMP
-venv\Scripts\activate.bat
-REM Prompt: (venv) C:\snmp_project\Beta-SNMP>
-```
-
-**Solution 3: Utiliser Python directement**
-```powershell
-# Sans activer venv, juste lancer avec python complet:
-C:\snmp_project\Beta-SNMP\venv\Scripts\python.exe collector/snmpv3_collector.py --mode test
+# Créer le venv dans WSL
+cd /mnt/c/snmp_project/Beta-SNMP
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ---
 
-## ❌ "ModuleNotFoundError: No module named 'pysnmp'" (même après pip install)
+## ✅ Vérifier que tout fonctionne
 
-**Problème:**
-```
-pip install -r requirements.txt
-# Installation réussie, mais:
-python collector/mock_snmp_agent.py
-ModuleNotFoundError: No module named 'pysnmp'
-```
-
-**Cause:** pip installe dans le répertoire **utilisateur global** (`AppData\Local\Packages\Python...`) au lieu du venv
-
-**Message tipique:**
-```
-Defaulting to user installation because normal site-packages is not writeable
-```
-
-**Solution (OBLIGATOIRE):**
 ```powershell
-# 1️⃣ S'assurer que le venv est bien activé
+# 1️⃣ Activer le venv
+cd C:\snmp_project\Beta-SNMP
 .\venv\Scripts\Activate.ps1
 # Prompt DOIT commencer par (venv)
 
-# 2️⃣ DÉSACTIVER le user site-packages
-set PYTHONUSERBASE=
+# 2️⃣ Vérifier pysnmp
+python -c "import pysnmp; print('✅ pysnmp', pysnmp.__version__)"
 
-# 3️⃣ Réinstaller DANS le venv (pas globalement)
-pip install --no-user -r requirements.txt
+# 3️⃣ Vérifier les imports async
+python -c "from pysnmp.hlapi.v3arch.asyncio import get_cmd; print('✅ async API OK')"
 
-# OU forcer avec --target:
-pip install --no-user --force-reinstall pysnmp==7.1.22
-
-# 4️⃣ Vérifier que c'est installé dans le venv
-python -c "import sys; print(sys.path)"
-# Doit afficher: C:\snmp_project\Beta-SNMP\venv\Lib\site-packages
-```
-
-**Si ça ne marche pas, réinitialiser le venv:**
-```powershell
-# Supprimer et recréer le venv
-Rm -Recurse -Force venv
-python -m venv venv
-.\venv\Scripts\Activate.ps1
-
-# Installation propre
-set PYTHONUSERBASE=
-pip install --no-user --upgrade pip
-pip install --no-user -r requirements.txt
-
-# Vérifier
-python -c "import pysnmp; print(pysnmp.__version__)"
-# Résultat: 7.1.22
+# 4️⃣ Tester le mock agent
+python collector/mock_snmp_agent.py --port 1161
+# Doit afficher: "🎭 Mock SNMP Agent - SNMPv3 Démarré"
 ```
 
 ---
 
-## ❌ SNMP Timeout: "No SNMP response received before timeout"
+## 📍 Vérifier l'installation de Python
 
-**Problème:**
+```powershell
+# Voir la version et la source
+python --version
+python -c "import sys; print(sys.executable)"
+
+# Doit afficher SOIT:
+# ✅ C:\Users\Mathis\AppData\Local\Programs\Python\Python313\python.exe
+# ✅ C:\Python313\python.exe
+
+# ❌ PAS:
+# ❌ C:\Program Files\WindowsApps\...\python.exe
 ```
-2026-02-08 17:30:38,270 - WARNING - SNMP Error: No SNMP response received before timeout
-ERREUR: Impossible de recuperer sysDescr
+
+---
+
+## 💡 Commandes Rapides de Reset
+
+```powershell
+# Supprimer et recréer le venv proprement
+cd C:\snmp_project\Beta-SNMP
+Rm -Recurse -Force venv
+python -m venv venv
+.\venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# Vérifier
+python -m pip list | grep pysnmp
 ```
 
-**Cause:** Il n'y a **PAS d'agent SNMP** qui écoute sur `127.0.0.1:161` ou `127.0.0.1:1161`
+---
 
-**Solution 1: Lancer un Mock SNMP Agent (RECOMMANDÉ pour TEST)**
+## ❌ Problèmes Supplémentaires
 
-Crée `collector/mock_snmp_agent.py` (déjà créé dans le repo):
+### PowerShell: "n'est pas reconnu" / Activation venv échoue
 
-**Puis lancer en 2 terminaux:**
+**Solution:**
+```powershell
+# En tant qu'Admin PowerShell:
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+# Répondre "Y" pour Oui
+```
+
+---
+
+### SNMP Timeout: "No SNMP response received before timeout"
+
+**Cause:** Pas d'agent SNMP sur `127.0.0.1:1161`
+
+**Solution:** Lancer le Mock Agent dans Terminal 1:
 
 **Terminal 1: Mock Agent**
 ```powershell
@@ -127,9 +172,7 @@ python collector/snmpv3_collector.py --mode test --host 127.0.0.1 --port 1161 --
 
 ---
 
-**Solution 2: Utiliser un Device SNMP réel**
-
-Si tu as un switch/routeur SNMP réel:
+### Utiliser un Device SNMP réel
 
 ```powershell
 python collector/snmpv3_collector.py --mode production \
@@ -143,38 +186,18 @@ python collector/snmpv3_collector.py --mode production \
 
 ---
 
-## ✅ Checklist Fixes
+## ✅ Checklist Finale
 
+- [ ] Python vient de **python.org** (pas Microsoft Store)
+- [ ] `python --version` affiche la bonne version
 - [ ] `Get-ExecutionPolicy` retourne `RemoteSigned`
 - [ ] Prompt commence par `(venv)`
-- [ ] `python -c "import pysnmp"` fonctionne (pas d'erreur)
-- [ ] Mock agent tourne sur Terminal 1
-- [ ] Collector retourne des OIDs sur Terminal 2
-- [ ] Pas de timeouts
+- [ ] `python -c "import pysnmp"` fonctionne
+- [ ] Mock agent tourne et affiche les OIDs
+- [ ] Collector collecte les OIDs avec succès
 
 ---
 
-## 🔗 Commandes Rapides de Debug
+## 🆘 Besoin d'aide?
 
-```powershell
-# Vérifier que pysnmp est installé dans le venv
-python -c "import pysnmp; print(pysnmp.__file__)"
-# Doit afficher: C:\snmp_project\Beta-SNMP\venv\Lib\site-packages\...
-
-# Lister tous les packages du venv
-pip list
-
-# Vérifier le chemin Python
-python -c "import sys; print('\n'.join(sys.path))"
-
-# Tester l'import async
-python -c "from pysnmp.hlapi.v3arch.asyncio import get_cmd; print('OK')"
-```
-
----
-
-## 📚 Ressources
-
-- [pysnmp 7.1.22 Documentation](https://docs.lextudio.com/pysnmp/v7.1/)
-- [Python venv Documentation](https://docs.python.org/3/library/venv.html)
-- [pip Documentation](https://pip.pypa.io/)
+Vois le [README.md](./README.md) pour le démarrage complet.
