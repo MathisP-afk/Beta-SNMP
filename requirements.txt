@@ -2,13 +2,28 @@
 scapy
 requests
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
+
+# SNMPv3 Manager
+pysnmp==5.1.1
+
+# PostgreSQL Driver
+psycopg2-binary>=2.9
+
+# Variables d'environnement
+python-dotenv>=0.20
 
 # Interface graphique
 flet
 
-# Outils de test et qualité (pour la pipeline)
+# Outils de test et qualité
 pytest
 httpx
 pylint
+
+# Logging & Utils
+python-json-logger>=2.0
+
+# SSL/Certificats (si besoin sur Windows)
+pyopenssl>=22.0
