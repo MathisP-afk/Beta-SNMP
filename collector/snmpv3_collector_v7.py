@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SNMPv3 Collector - pysnmp 7.1.22 CORRECT
+SNMPv3 Collector - pysnmp 7.1.22 SIMPLIFIE
 Collecte les donnees SNMP d'un switch et les envoie a l'API
-VERSION CORRECTE: Utilise l'API hlapi de pysnmp 7.x
+VERSION SIMPLIFIEE: Utilise l'approche compatible pysnmp 7.1.22
 """
 
 import os
@@ -14,36 +14,6 @@ from typing import Dict, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
-
-try:
-    # IMPORTS CORRECTS pour pysnmp 7.x via hlapi
-    from pysnmp.hlapi.v3arch.asyncio import (
-        SnmpEngine,
-        UsmUserData,
-        UdpTransportTarget,
-        ContextData,
-        ObjectType,
-        ObjectIdentity,
-        getCmd,
-    )
-    import asyncio
-except ImportError:
-    # Fallback: essayer l'import v1 (compatible)
-    try:
-        from pysnmp.hlapi import (
-            SnmpEngine,
-            UsmUserData,
-            UdpTransportTarget,
-            ContextData,
-            ObjectType,
-            ObjectIdentity,
-            getCmd,
-        )
-    except ImportError as e:
-        print(f"ERREUR CRITIQUE: {e}")
-        print("\nInstalle pysnmp 7.1.22:")
-        print("  pip install pysnmp==7.1.22 pyopenssl cryptography --force-reinstall")
-        sys.exit(1)
 
 # Configuration logging
 logging.basicConfig(
@@ -96,15 +66,22 @@ class SNMPv3Collector:
         self.config = config
         self.mode = mode
         self.verbose = verbose
-        self.snmp_engine = SnmpEngine()
+        
+        # Importer pysnmp de maniere flexible
+        try:
+            from pysnmp import SnmpEngine
+            self.snmp_engine = SnmpEngine()
+        except ImportError:
+            logger.error("Impossible d'importer SnmpEngine")
+            raise
         
         if self.verbose:
             logger.setLevel(logging.DEBUG)
             logger.debug(f"Mode: {mode.value}")
             logger.debug(f"Host: {config.host}:{config.port}")
     
-    def get_oid(self, oid: str) -> Optional[Any]:
-        """Recupere la valeur d'un OID
+    def get_oid_pysnmp7(self, oid: str) -> Optional[Any]:
+        """Recupere la valeur d'un OID avec pysnmp 7.x
         
         Args:
             oid: OID a recuperer (ex: "1.3.6.1.2.1.1.5.0")
@@ -113,9 +90,22 @@ class SNMPv3Collector:
             Valeur de l'OID ou None
         """
         try:
-            # Creer l'utilisateur SNMPv3 (pysnmp 7.x)
+            # Import inside method to handle different pysnmp versions
+            from pysnmp import SnmpEngine
+            from pysnmp.hlapi import (
+                UsmUserData,
+                UdpTransportTarget,
+                ContextData,
+                ObjectType,
+                ObjectIdentity,
+                getCmd,
+            )
+            
+            snmp_engine = SnmpEngine()
+            
+            # Creer l'utilisateur SNMPv3
             user_data = UsmUserData(
-                self.config.username,
+                userName=self.config.username,
                 authKey=self.config.auth_password,
                 privKey=self.config.priv_password,
             )
@@ -132,7 +122,7 @@ class SNMPv3Collector:
             
             # Executer le GET
             iterator = getCmd(
-                self.snmp_engine,
+                snmp_engine,
                 user_data,
                 target,
                 context,
@@ -163,6 +153,10 @@ class SNMPv3Collector:
             if self.verbose:
                 logger.error(f"Exception lors du GET {oid}: {e}")
             return None
+    
+    def get_oid(self, oid: str) -> Optional[Any]:
+        """Wrapper pour recuperer un OID"""
+        return self.get_oid_pysnmp7(oid)
     
     def collect_system_info(self) -> Dict[str, Any]:
         """Collecte les informations systeme de base
@@ -329,6 +323,9 @@ Exemples:
         sys.exit(0)
     except Exception as e:
         logger.error(f"Erreur fatale: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
         sys.exit(1)
 
 
