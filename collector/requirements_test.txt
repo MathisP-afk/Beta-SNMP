@@ -1,0 +1,5 @@
+# Dépendances pour tests avec simulateur SNMP
+snmpsim>=1.0.2
+pysnmp==7.1.22
+pyasn1>=0.4.8
+cryptography>=42.0.0
