@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-SNMPv3 Collector - pysnmp 7.1.22 compatible
+SNMPv3 Collector - pysnmp 7.1.22 CORRECT
 Collecte les donnees SNMP d'un switch et les envoie a l'API
+VERSION CORRECTE: Utilise l'API hlapi de pysnmp 7.x
 """
 
 import os
@@ -9,32 +10,40 @@ import sys
 import json
 import argparse
 import time
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 import logging
 
 try:
-    # IMPORTS CRITIQUES pour pysnmp 7.x
-    from pysnmp import SnmpEngine, hlapi
-    from pysnmp.hlapi import (
-        CommunityData,
+    # IMPORTS CORRECTS pour pysnmp 7.x via hlapi
+    from pysnmp.hlapi.v3arch.asyncio import (
+        SnmpEngine,
         UsmUserData,
         UdpTransportTarget,
         ContextData,
         ObjectType,
         ObjectIdentity,
         getCmd,
-        setCmd,
-        nextCmd,
-        bulkCmd,
     )
-    from pysnmp.proto import rfc1902
-except ImportError as e:
-    print(f"ERREUR CRITIQUE: {e}")
-    print("\nInstalle pysnmp 7.1.22:")
-    print("  pip install pysnmp==7.1.22 pyopenssl cryptography")
-    sys.exit(1)
+    import asyncio
+except ImportError:
+    # Fallback: essayer l'import v1 (compatible)
+    try:
+        from pysnmp.hlapi import (
+            SnmpEngine,
+            UsmUserData,
+            UdpTransportTarget,
+            ContextData,
+            ObjectType,
+            ObjectIdentity,
+            getCmd,
+        )
+    except ImportError as e:
+        print(f"ERREUR CRITIQUE: {e}")
+        print("\nInstalle pysnmp 7.1.22:")
+        print("  pip install pysnmp==7.1.22 pyopenssl cryptography --force-reinstall")
+        sys.exit(1)
 
 # Configuration logging
 logging.basicConfig(
@@ -57,8 +66,6 @@ class SNMPConfig:
     port: int = 161
     timeout: int = 2
     retries: int = 3
-    auth_protocol: str = "hmacSha"  # pysnmp 7.x: hmacSha ou hmacSha256
-    priv_protocol: str = "aes"      # pysnmp 7.x: aes ou 3des
     username: str = "admin"
     auth_password: str = ""
     priv_password: str = ""
@@ -95,7 +102,6 @@ class SNMPv3Collector:
             logger.setLevel(logging.DEBUG)
             logger.debug(f"Mode: {mode.value}")
             logger.debug(f"Host: {config.host}:{config.port}")
-            logger.debug(f"Auth: {config.auth_protocol}, Priv: {config.priv_protocol}")
     
     def get_oid(self, oid: str) -> Optional[Any]:
         """Recupere la valeur d'un OID
@@ -107,13 +113,11 @@ class SNMPv3Collector:
             Valeur de l'OID ou None
         """
         try:
-            # Creer l'utilisateur SNMPv3
+            # Creer l'utilisateur SNMPv3 (pysnmp 7.x)
             user_data = UsmUserData(
                 self.config.username,
-                self.config.auth_password,
-                self.config.priv_password,
-                authProtocol=self.config.auth_protocol,
-                privProtocol=self.config.priv_protocol,
+                authKey=self.config.auth_password,
+                privKey=self.config.priv_password,
             )
             
             # Configuration de la cible
@@ -193,7 +197,8 @@ class SNMPv3Collector:
             
             if value:
                 data["results"][name] = value
-                logger.info(f"    OK: {name} = {value[:50]}..." if len(str(value)) > 50 else f"    OK: {name} = {value}")
+                value_display = value[:50] + "..." if len(str(value)) > 50 else value
+                logger.info(f"    OK: {name} = {value_display}")
             else:
                 logger.warning(f"    ERREUR: Impossible de recuperer {name}")
         
