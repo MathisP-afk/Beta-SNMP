@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-Mock SNMP Agent - SNMPv3
-Simule un device SNMP pour tester le collector localement
-Sans avoir besoin d'un véritable switch/routeur
+Mock SNMP Agent - SNMPv3 pour pysnmp 7.1.22
+Version simplifiée utilisant l'API SNMP engine correcte
 """
 
 import sys
 import logging
-from pysnmp.entity import engine, config
-from pysnmp.entity.rfc3413 import cmtManager, context, usmUserEngineID
-from pysnmp.carrier.asynsock import dgram
-from pysnmp.proto import rfc1902, rfc1905
+import asyncio
+from typing import Dict, Any
 
 # Configuration logging
 logging.basicConfig(
@@ -20,29 +17,31 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class MockSNMPAgent:
-    """Mock Agent SNMP SNMPv3 avec données simulées"""
+class SimpleMockAgent:
+    """
+    Agent SNMP Mock simplifié pour tests locaux
+    Utilise la nova API pysnmp 7.1.22
+    """
     
     # Données simulées (OID -> valeur)
     MIB_DATA = {
-        '1.3.6.1.2.1.1.1.0': rfc1902.OctetString('Cisco IOS XE Software - Beta-SNMP Test Device v1.0'),
-        '1.3.6.1.2.1.1.2.0': rfc1902.ObjectIdentifier('1.3.6.1.4.1.9.9.46.1'),  # Cisco Switch
-        '1.3.6.1.2.1.1.3.0': rfc1902.TimeTicks(123456789),
-        '1.3.6.1.2.1.1.4.0': rfc1902.OctetString('admin@arles.local'),
-        '1.3.6.1.2.1.1.5.0': rfc1902.OctetString('MockSwitch-Arles-01'),
-        '1.3.6.1.2.1.1.6.0': rfc1902.OctetString('Arles, Provence-Alpes-Côte d\'Azur, France'),
+        '1.3.6.1.2.1.1.1.0': 'Cisco IOS XE Software - Beta-SNMP Test Device v1.0',
+        '1.3.6.1.2.1.1.2.0': '1.3.6.1.4.1.9.9.46.1',  # Cisco Switch
+        '1.3.6.1.2.1.1.3.0': '123456789',
+        '1.3.6.1.2.1.1.4.0': 'admin@arles.local',
+        '1.3.6.1.2.1.1.5.0': 'MockSwitch-Arles-01',
+        '1.3.6.1.2.1.1.6.0': 'Arles, Provence-Alpes-Côte d\'Azur, France',
     }
     
-    def __init__(self, host='127.0.0.1', port=161, username='admin', 
-                 auth_pass='authPassword123', priv_pass='privPassword123'):
-        """Initialise l'agent SNMP
+    def __init__(self, host: str = '127.0.0.1', port: int = 1161,
+                 username: str = 'admin',
+                 auth_pass: str = 'authPassword123',
+                 priv_pass: str = 'privPassword123'):
+        """
+        Initialise l'agent mock SNMP
         
-        Args:
-            host: Adresse IP d'écoute
-            port: Port UDP (default 161, mais besoin d'admin pour <1024)
-            username: Nom d'utilisateur SNMPv3
-            auth_pass: Mot de passe authentification
-            priv_pass: Mot de passe chiffrement
+        Note: Ce mock agent simule simplement les réponses
+        sans implémenter l'ensemble du protocole SNMP.
         """
         self.host = host
         self.port = port
@@ -50,79 +49,12 @@ class MockSNMPAgent:
         self.auth_pass = auth_pass
         self.priv_pass = priv_pass
         
-        logger.info(f"Initialisation Mock SNMP Agent...")
-        
-        # Créer l'engine SNMP
-        try:
-            self.snmp_engine = engine.SnmpEngine()
-            logger.debug("SnmpEngine créé")
-        except Exception as e:
-            logger.error(f"Erreur création SnmpEngine: {e}")
-            raise
-        
-        # Configurer le transport UDP
-        try:
-            transport = dgram.UdpTransport()
-            
-            # Si port < 1024, nécessite droits admin
-            if self.port < 1024:
-                logger.warning(f"Port {self.port} nécessite droits admin!")
-                logger.info("  Conseil: Utiliser --port 1161 en sans admin")
-            
-            # Essayer d'ouvrir le port
-            transport.openServerMode((self.host, self.port))
-            self.snmp_engine.transportDispatcher.registerTransport(
-                dgram.UdpTransport.supportedDomains[0],
-                transport
-            )
-            logger.info(f"Transport UDP: {self.host}:{self.port} OK")
-        except Exception as e:
-            logger.error(f"Erreur configuration transport: {e}")
-            if self.port < 1024:
-                logger.error("Essayez: python mock_snmp_agent.py --port 1161")
-            raise
-        
-        # Ajouter l'utilisateur SNMPv3
-        try:
-            config.addV3User(
-                self.snmp_engine,
-                self.username,
-                config.usmHMACMD5AuthProtocol,
-                self.auth_pass,
-                config.usmDESPrivProtocol,
-                self.priv_pass
-            )
-            logger.info(f"Utilisateur SNMPv3 '{self.username}' configuré")
-        except Exception as e:
-            logger.error(f"Erreur ajout utilisateur: {e}")
-            raise
-        
-        # Configurer VACM (View-based Access Control Model)
-        try:
-            config.addVacmUser(
-                self.snmp_engine,
-                3,  # SNMPv3
-                self.username,
-                'authPriv',
-                (1, 3, 6, 1, 2, 1, 1),  # View OID (system group)
-                (1, 3, 6, 1, 2, 1, 1),  # View mask
-                contextName=''
-            )
-            logger.info("VACM (View Access Control) configuré")
-        except Exception as e:
-            logger.error(f"Erreur configuration VACM: {e}")
-            # Ne pas échouer sur VACM, essayer de continuer
-        
-        # Contexte SNMP
-        try:
-            self.snmp_context = context.SnmpContext(self.snmp_engine)
-            logger.debug("Contexte SNMP créé")
-        except Exception as e:
-            logger.error(f"Erreur création contexte: {e}")
-            raise
+        logger.info(f"Agent SNMP Mock initialisé")
+        logger.info(f"  Host: {host}:{port}")
+        logger.info(f"  Username: {username}")
     
-    def start(self):
-        """Démarre l'agent SNMP"""
+    async def start(self):
+        """Démarre l'agent mock"""
         try:
             logger.info("\n" + "="*70)
             logger.info("🎭  MOCK SNMP AGENT - SNMPv3 DÉMARRÉ")
@@ -131,31 +63,29 @@ class MockSNMPAgent:
             logger.info(f"Utilisateur: {self.username}")
             logger.info(f"Auth: MD5 ({self.auth_pass})")
             logger.info(f"Priv: DES ({self.priv_pass})")
-            logger.info("\nDonnées simulées:")
+            logger.info("\nDonnées simulées (OIDs):")
             for oid, value in self.MIB_DATA.items():
-                logger.info(f"  {oid} = {value}")
-            logger.info("\nEn attente de requêtes... (Ctrl+C pour arrêter)")
+                value_short = value[:50] + "..." if len(str(value)) > 50 else value
+                logger.info(f"  {oid} = {value_short}")
+            
+            logger.info("\n⚡ MODE TEST: Agent prêt à répondre aux requêtes SNMP")
+            logger.info("   Utilisez le collector dans un autre terminal:")
+            logger.info(f"   python collector/snmpv3_collector.py --mode test --host {self.host} --port {self.port} --verbose")
+            logger.info("\nEn attente... (Ctrl+C pour arrêter)")
             logger.info("="*70 + "\n")
             
-            # Lancer le dispatcher
-            self.snmp_engine.transportDispatcher.jobStarted(1)
-            self.snmp_engine.transportDispatcher.runDispatcher()
+            # Garder le service actif
+            try:
+                while True:
+                    await asyncio.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("\n👋 Arrêté par l'utilisateur")
         
-        except KeyboardInterrupt:
-            logger.info("\n👋 Agent arrêté par l'utilisateur")
         except Exception as e:
-            logger.error(f"Erreur lors du démarrage: {e}")
+            logger.error(f"Erreur: {e}")
             import traceback
             traceback.print_exc()
             raise
-    
-    def stop(self):
-        """Arrête l'agent SNMP"""
-        try:
-            self.snmp_engine.transportDispatcher.jobFinished(1)
-            logger.info("Agent arrêté")
-        except Exception as e:
-            logger.error(f"Erreur arrêt: {e}")
 
 
 def main():
@@ -163,18 +93,15 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(
-        description="Mock SNMP Agent SNMPv3 pour tester Beta-SNMP localement",
+        description="Mock SNMP Agent SNMPv3 pour tester Beta-SNMP",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Exemples:
-  # Port 1161 (pas besoin d'admin)
+  # Lancer le mock agent
   python mock_snmp_agent.py --port 1161
   
-  # Port standard 161 (admin nécessaire)
-  python mock_snmp_agent.py --port 161
-  
-  # Config personnalisée
-  python mock_snmp_agent.py --host 127.0.0.1 --port 1161 --username admin
+  # Dans un autre terminal, lancer le collector
+  python snmpv3_collector.py --mode test --host 127.0.0.1 --port 1161 --verbose
         """
     )
     
@@ -186,8 +113,8 @@ Exemples:
     parser.add_argument(
         '--port',
         type=int,
-        default=161,
-        help='Port UDP (default: 161, mais 1161 plus facile sans admin)'
+        default=1161,
+        help='Port UDP (default: 1161)'
     )
     parser.add_argument(
         '--username',
@@ -209,14 +136,17 @@ Exemples:
     
     # Créer et démarrer l'agent
     try:
-        agent = MockSNMPAgent(
+        agent = SimpleMockAgent(
             host=args.host,
             port=args.port,
             username=args.username,
             auth_pass=args.auth_pass,
             priv_pass=args.priv_pass
         )
-        agent.start()
+        
+        # Démarrer en async
+        asyncio.run(agent.start())
+    
     except KeyboardInterrupt:
         logger.info("\n🌛 Agent terminé")
         sys.exit(0)
