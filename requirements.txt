@@ -1,8 +1,8 @@
 # SNMPv3 Collector - Dependencies
-# Version stable pour Windows
+# Version stable avec pysnmp 7.1.22 (derniere version disponible)
 
-# SNMP (STABLE VERSION - recommended for Windows)
-pysnmp==5.4.4
+# SNMP (derniere version disponible)
+pysnmp==7.1.22
 
 # Cryptography & Security
 pyopenssl>=22.0.0
