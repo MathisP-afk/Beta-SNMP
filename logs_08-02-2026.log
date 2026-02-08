@@ -1,0 +1,20 @@
+[08-02-2026_15:10:47] - Connexion à la base de données réussie.
+[08-02-2026_15:10:47] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[08-02-2026_15:10:47] - Création de la clé API - ID: 1.
+[08-02-2026_15:11:07] - Connexion à la base de données réussie.
+[08-02-2026_15:11:07] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[08-02-2026_15:11:07] - Création de la clé API - ID: 2.
+[08-02-2026_15:11:43] - Erreur de connexion Ã  la base de donnÃ©es : connection to server at "localhost" (::1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+connection to server at "localhost" (127.0.0.1), port 5432 failed: Connection refused (0x0000274D/10061)
+	Is the server running on that host and accepting TCP/IP connections?
+.
+[08-02-2026_15:14:31] - Connexion à la base de données réussie.
+[08-02-2026_15:14:31] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[08-02-2026_15:14:31] - Création de la clé API - ID: 3.
+[08-02-2026_15:14:38] - Connexion à la base de données réussie.
+[08-02-2026_15:14:38] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[08-02-2026_15:14:38] - Création de la clé API - ID: 1.
+[08-02-2026_15:15:06] - Connexion à la base de données réussie.
+[08-02-2026_15:15:06] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[08-02-2026_15:15:06] - Création de la clé API - ID: 2.
