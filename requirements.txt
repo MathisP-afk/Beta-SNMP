@@ -1,29 +1,33 @@
-# Cœur réseau et API
-scapy
-requests
-fastapi
-uvicorn[standard]
-pydantic
+# SNMPv3 Collector - Dependencies
+# Version stable pour Windows
 
-# SNMPv3 Manager
-pysnmp>=7.1.22
+# SNMP (STABLE VERSION - recommended for Windows)
+pysnmp==5.4.4
 
-# PostgreSQL Driver
-psycopg2-binary>=2.9
+# Cryptography & Security
+pyopenssl>=22.0.0
+cryptography>=40.0.0
 
-# Variables d'environnement
-python-dotenv>=0.20
+# API Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
 
-# Interface graphique
-flet
+# Database
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.0
+alembic>=1.12.0
 
-# Outils de test et qualité
-pytest
-httpx
-pylint
+# Configuration
+python-dotenv>=1.0.0
 
-# Logging & Utils
-python-json-logger>=2.0
+# Utilities
+requests>=2.31.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
 
-# SSL/Certificats (si besoin sur Windows)
-pyopenssl>=22.0
+# Development (optional)
+# pytest>=7.4.0
+# pytest-asyncio>=0.21.0
+# black>=23.0.0
+# flake8>=6.0.0
