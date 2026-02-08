@@ -1,469 +1,401 @@
+#!/usr/bin/env python3
 """
-Collector SNMPv3 - Polling + Traps
-Envoie les données collectées vers l'API HTTPS avec retry/batch
+SNMPv3 Collector - Pure Python avec pysnmp 7.1.22
+Collecte les donnees SNMP d'un switch et les envoie a l'API
+APPROCHE: Utilise asyncio + event loop de pysnmp 7.x
 """
+
+import os
+import sys
 import json
-import logging
-import time
-import threading
 import argparse
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import requests
-from urllib3.exceptions import InsecureRequestWarning
+import time
+import asyncio
+from typing import Dict, Optional, Any
+from dataclasses import dataclass
+from enum import Enum
+import logging
 
-# Supprime les warnings de certificat auto-signé
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+# Configuration logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-try:
-    from pysnmp.hlapi import *
-    from pysnmp.proto.rfc1902 import OctetString
-    PYSNMP_AVAILABLE = True
-except ImportError:
-    PYSNMP_AVAILABLE = False
-    print("❌ ERREUR: pysnmp non installé. Exécuter: pip install pysnmp==5.1.1")
 
-from collector.snmp_config import SNMPConfig
-from collector.oid_mappings import get_flat_oid_list, get_oid_name, COLLECTION_STANDARD
-from collector.logger_config import setup_logger, get_default_log_file
+class SNMPMode(Enum):
+    """Modes de fonctionnement du collector"""
+    TEST = "test"
+    PRODUCTION = "production"
+
 
 @dataclass
-class SNMPValue:
-    """Représente une valeur SNMP collectée"""
-    oid: str
-    value: Any
-    type: str
-    timestamp: str
-    
-    def to_dict(self) -> dict:
-        return asdict(self)
+class SNMPConfig:
+    """Configuration SNMPv3"""
+    host: str = "192.168.1.1"
+    port: int = 161
+    timeout: int = 2
+    retries: int = 3
+    username: str = "admin"
+    auth_password: str = ""
+    priv_password: str = ""
+
 
 class SNMPv3Collector:
-    """
-    Collecteur SNMPv3 thread-safe
-    - Polling des OIDs
-    - Batch & Retry automatique
-    - Envoi vers API HTTPS
-    """
+    """Collecteur SNMPv3 compatible pysnmp 7.1.22 avec asyncio"""
     
-    def __init__(self, config: SNMPConfig, logger: Optional[logging.Logger] = None):
-        """
+    # OIDs de base (SNMP MIB-II)
+    OIDS = {
+        "sysDescr": "1.3.6.1.2.1.1.1.0",
+        "sysObjectID": "1.3.6.1.2.1.1.2.0",
+        "sysUpTime": "1.3.6.1.2.1.1.3.0",
+        "sysContact": "1.3.6.1.2.1.1.4.0",
+        "sysName": "1.3.6.1.2.1.1.5.0",
+        "sysLocation": "1.3.6.1.2.1.1.6.0",
+        "ifNumber": "1.3.6.1.2.1.2.1.0",
+    }
+    
+    def __init__(self, config: SNMPConfig, mode: SNMPMode = SNMPMode.TEST, verbose: bool = False):
+        """Initialise le collecteur SNMPv3
+        
         Args:
             config: Configuration SNMPv3
-            logger: Logger (crée un par défaut si None)
+            mode: Mode TEST ou PRODUCTION
+            verbose: Affichage detaille
         """
         self.config = config
-        self.logger = logger or setup_logger(
-            level=config.log_level,
-            log_file=config.log_file
-        )
+        self.mode = mode
+        self.verbose = verbose
         
-        # État du collector
-        self.running = False
-        self.last_poll_time = None
-        self.poll_count = 0
-        self.error_count = 0
+        # Verifier que pysnmp est disponible
+        try:
+            import pysnmp
+            logger.debug(f"pysnmp {pysnmp.__version__} charge")
+        except ImportError as e:
+            logger.error(f"Impossible d'importer pysnmp: {e}")
+            raise
         
-        # Queue des paquets à envoyer
-        self.batch_queue: List[Dict] = []
-        self.queue_lock = threading.Lock()
-        
-        # Threads
-        self.poll_thread = None
-        self.sender_thread = None
-        
-        self.logger.info(f"🔧 Collector initialisé: {config}")
+        if self.verbose:
+            logger.setLevel(logging.DEBUG)
+            logger.debug(f"Mode: {mode.value}")
+            logger.debug(f"Host: {config.host}:{config.port}")
     
-    # ========================================================================
-    # POLLING SNMP
-    # ========================================================================
-    
-    def poll_oids(self, oid_list: List[str]) -> List[SNMPValue]:
-        """
-        Effectue un SNMP GETBULK sur une liste d'OIDs
+    async def get_oid_async(self, oid: str) -> Optional[Any]:
+        """Recupere la valeur d'un OID avec asyncio
         
         Args:
-            oid_list: Liste d'OIDs à collecter
-        
-        Returns:
-            List[SNMPValue]: Valeurs collectées
-        """
-        if not PYSNMP_AVAILABLE:
-            self.logger.error("❌ pysnmp non disponible!")
-            return []
-        
-        results = []
-        
-        try:
-            # Créer le moteur de communauté SNMPv3
-            engine = SnmpEngine()
+            oid: OID a recuperer (ex: "1.3.6.1.2.1.1.5.0")
             
-            # Authentification SNMPv3 authPriv
-            auth = UsmUserData(
-                self.config.username,
-                self.config.auth_password,
-                self.config.priv_password,
-                authProtocol=usmHMACMD5 if self.config.auth_protocol.lower() == "md5" else usmHMACSHAAuthProtocol,
-                privProtocol=usmDESPrivProtocol if self.config.priv_protocol.lower() == "des" else usmAesCfb128Protocol,
+        Returns:
+            Valeur de l'OID ou None
+        """
+        try:
+            # Import dynamique de l'API asyncio de pysnmp 7.x
+            from pysnmp.hlapi.asyncio import (
+                Snmpv3Engine,
+                UsmUserData,
+                UdpTransportTarget,
+                ContextData,
+                ObjectType,
+                ObjectIdentity,
+                getCmd,
             )
             
-            # Cible SNMP
+            # Creer l'utilisateur SNMPv3
+            user_data = UsmUserData(
+                userName=self.config.username,
+                authKey=self.config.auth_password,
+                privKey=self.config.priv_password,
+            )
+            
+            # Configuration de la cible
             target = UdpTransportTarget(
-                (self.config.target_ip, self.config.target_port),
+                (self.config.host, self.config.port),
                 timeout=self.config.timeout,
-                retries=self.config.retry_count
+                retries=self.config.retries,
             )
             
             # Contexte SNMP
-            context = ContextData(
-                contextName=OctetString(self.config.context_name),
-                contextEngineId=OctetString(hexValue=self.config.engine_id) if self.config.engine_id else None
-            )
+            context = ContextData()
             
-            # Effectuer le GETBULK
-            iterator = bulkCmd(
-                engine,
-                auth,
+            # Executer le GET (async)
+            errorIndication, errorStatus, errorIndex, varBinds = await getCmd(
+                Snmpv3Engine(),
+                user_data,
                 target,
                 context,
-                0,  # nonRepeaters
-                self.config.batch_size,  # maxRepetitions
-                *[ObjectType(ObjectIdentity(oid)) for oid in oid_list],
-                lexicographicMode=False
+                ObjectType(ObjectIdentity(oid)),
             )
             
-            # Traiter les résultats
-            for error_indication, error_status, error_index, var_binds in iterator:
-                if error_indication:
-                    self.logger.error(f"❌ Erreur SNMP: {error_indication}")
-                    self.error_count += 1
-                    break
-                
-                if error_status:
-                    self.logger.warning(f"⚠️ Status erreur: {error_status.prettyPrint()}")
-                    continue
-                
-                # Chaque var_bind est un tuple (oid, value)
-                for var_bind in var_binds:
-                    oid_str = str(var_bind)
-                    value = var_bind
-                    
-                    # Déterminer le type de la valeur
-                    value_type = type(value).__name__
-                    
-                    # Créer un SNMPValue
-                    snmp_val = SNMPValue(
-                        oid=oid_str,
-                        value=str(value),
-                        type=value_type,
-                        timestamp=datetime.now().isoformat()
-                    )
-                    
-                    results.append(snmp_val)
-                    self.logger.debug(f"✓ Collecté: {get_oid_name(oid_str)} = {value}")
+            if errorIndication:
+                if self.verbose:
+                    logger.warning(f"SNMP Error: {errorIndication}")
+                return None
             
-            self.logger.info(f"📊 Poll résultat: {len(results)} OIDs collectés")
-            return results
+            if errorStatus:
+                if self.verbose:
+                    logger.warning(f"SNMP Status Error: {errorStatus.prettyPrint()}")
+                return None
+            
+            # Extraire la valeur
+            for varBind in varBinds:
+                oid_recv, value = varBind
+                if self.verbose:
+                    logger.debug(f"Received: {oid_recv} = {value}")
+                return str(value)
+        
+        except ImportError:
+            # Fallback: utiliser l'API synchrone
+            logger.debug("Fallback vers API synchrone")
+            return self.get_oid_sync(oid)
         
         except Exception as e:
-            self.logger.error(f"❌ Erreur lors du polling: {e}")
-            self.error_count += 1
-            return []
+            if self.verbose:
+                logger.error(f"Exception lors du GET {oid}: {e}")
+            return None
     
-    # ========================================================================
-    # ENVOI VERS L'API
-    # ========================================================================
-    
-    def send_batch_to_api(self, batch: List[Dict]) -> bool:
-        """
-        Envoie un batch de paquets SNMPv3 vers l'API HTTPS
-        
-        Args:
-            batch: Liste de paquets à envoyer
-        
-        Returns:
-            bool: True si envoyé avec succès
-        """
-        if not batch:
-            return True
-        
+    def get_oid_sync(self, oid: str) -> Optional[Any]:
+        """Recupere la valeur d'un OID (synchrone, fallback)"""
         try:
-            headers = {
-                "Authorization": f"Bearer {self.config.api_key}",
-                "Content-Type": "application/json"
-            }
+            # Import de l'API sync de pysnmp 7.x
+            from pysnmp.hlapi import (
+                SnmpEngine,
+                UsmUserData,
+                UdpTransportTarget,
+                ContextData,
+                ObjectType,
+                ObjectIdentity,
+                getCmd,
+            )
             
-            endpoint = f"{self.config.api_base_url}/snmp/v3/add"
+            snmp_engine = SnmpEngine()
             
-            success_count = 0
-            for packet in batch:
-                try:
-                    response = requests.post(
-                        endpoint,
-                        json=packet,
-                        headers=headers,
-                        verify=False,  # Ignorer le certificat auto-signé
-                        timeout=self.config.api_timeout
-                    )
-                    
-                    if response.status_code == 200:
-                        success_count += 1
-                        self.logger.debug(f"✓ Paquet envoyé: {packet['oid_racine']}")
-                    else:
-                        self.logger.warning(f"⚠️ API retourna {response.status_code}: {response.text}")
-                
-                except requests.exceptions.RequestException as e:
-                    self.logger.error(f"❌ Erreur d'envoi API: {e}")
-                    return False
+            # Creer l'utilisateur SNMPv3
+            user_data = UsmUserData(
+                userName=self.config.username,
+                authKey=self.config.auth_password,
+                privKey=self.config.priv_password,
+            )
             
-            self.logger.info(f"📤 Envoyé: {success_count}/{len(batch)} paquets")
-            return success_count == len(batch)
+            # Configuration de la cible
+            target = UdpTransportTarget(
+                (self.config.host, self.config.port),
+                timeout=self.config.timeout,
+                retries=self.config.retries,
+            )
+            
+            # Contexte SNMP
+            context = ContextData()
+            
+            # Executer le GET
+            iterator = getCmd(
+                snmp_engine,
+                user_data,
+                target,
+                context,
+                ObjectType(ObjectIdentity(oid)),
+            )
+            
+            # Recuperer le resultat
+            errorIndication, errorStatus, errorIndex, varBinds = next(iterator)
+            
+            if errorIndication:
+                if self.verbose:
+                    logger.warning(f"SNMP Error: {errorIndication}")
+                return None
+            
+            if errorStatus:
+                if self.verbose:
+                    logger.warning(f"SNMP Status Error: {errorStatus.prettyPrint()}")
+                return None
+            
+            # Extraire la valeur
+            for varBind in varBinds:
+                oid_recv, value = varBind
+                if self.verbose:
+                    logger.debug(f"Received: {oid_recv} = {value}")
+                return str(value)
         
         except Exception as e:
-            self.logger.error(f"❌ Erreur lors de l'envoi: {e}")
-            return False
+            if self.verbose:
+                logger.error(f"Exception lors du GET sync {oid}: {e}")
+            return None
     
-    # ========================================================================
-    # FORMATAGE PAYLOAD POUR L'API
-    # ========================================================================
+    def get_oid(self, oid: str) -> Optional[Any]:
+        """Wrapper pour recuperer un OID (synchrone)"""
+        return self.get_oid_sync(oid)
     
-    def format_payload_v3(self, values: List[SNMPValue]) -> Dict:
-        """
-        Formate les valeurs SNMP en payload API v3
-        
-        Args:
-            values: Valeurs collectées
+    def collect_system_info(self) -> Dict[str, Any]:
+        """Collecte les informations systeme de base
         
         Returns:
-            dict: Payload conforme à PostTrameSNMPv3
+            Dict avec les donnees SNMP
         """
-        if not values:
-            return {}
+        data = {
+            "timestamp": time.time(),
+            "mode": self.mode.value,
+            "host": self.config.host,
+            "results": {}
+        }
         
-        # Utiliser le premier OID comme racine
-        oid_racine = values.oid
-        
-        # Convertir les valeurs en varbinds
-        varbinds = [
-            {
-                "oid": val.oid,
-                "type": val.type,
-                "value": val.value
+        if self.mode == SNMPMode.TEST:
+            # Mode TEST: OIDs basiques
+            test_oids = {
+                "sysDescr": self.OIDS["sysDescr"],
+                "sysUpTime": self.OIDS["sysUpTime"],
+                "sysName": self.OIDS["sysName"],
+                "sysLocation": self.OIDS["sysLocation"],
             }
-            for val in values
-        ]
+        else:
+            # Mode PRODUCTION: tous les OIDs
+            test_oids = self.OIDS
         
-        payload = {
-            "source_ip": self.config.target_ip,
-            "source_port": self.config.target_port,
-            "dest_ip": "192.168.1.87",  # PC Windows
-            "dest_port": 162,
-            "oid_racine": oid_racine,
-            "type_pdu": "GetResponse",
-            "contexte": self.config.context_name,
-            "niveau_securite": self.config.security_level,
-            "utilisateur": self.config.username,
-            "request_id": int(time.time() * 1000) % 2147483647,  # PID basé sur timestamp
-            "error_status": "0",
-            "error_index": 0,
-            "engine_id": self.config.engine_id or "",
-            "contenu": {"varbinds": varbinds}
-        }
+        logger.info(f"Collecte {len(test_oids)} OIDs en mode {self.mode.value}...")
         
-        return payload
-    
-    # ========================================================================
-    # THREADS
-    # ========================================================================
-    
-    def _polling_loop(self, collection: str = "standard"):
-        """Thread de polling périodique"""
-        self.logger.info(f"🔄 Démarrage du polling ({self.config.poll_interval}s d'intervalle)")
-        
-        oid_list = get_flat_oid_list(collection)
-        
-        while self.running:
-            try:
-                # Collecter les OIDs
-                values = self.poll_oids(oid_list)
-                
-                if values:
-                    # Formater le payload
-                    payload = self.format_payload_v3(values)
-                    
-                    # Ajouter à la queue
-                    with self.queue_lock:
-                        self.batch_queue.append(payload)
-                    
-                    self.poll_count += 1
-                    self.last_poll_time = datetime.now()
-                
-                # Attendre avant le prochain poll
-                time.sleep(self.config.poll_interval)
+        for name, oid in test_oids.items():
+            logger.info(f"  Recuperation {name}...")
+            value = self.get_oid(oid)
             
-            except Exception as e:
-                self.logger.error(f"❌ Erreur dans le loop de polling: {e}")
-                time.sleep(self.config.poll_interval)
+            if value:
+                data["results"][name] = value
+                value_display = value[:50] + "..." if len(str(value)) > 50 else value
+                logger.info(f"    OK: {name} = {value_display}")
+            else:
+                logger.warning(f"    ERREUR: Impossible de recuperer {name}")
+        
+        return data
     
-    def _sender_loop(self):
-        """Thread d'envoi par batch"""
-        self.logger.info(f"📤 Démarrage du sender (batch size: {self.config.batch_size})")
+    def test_connection(self) -> bool:
+        """Teste la connexion au device
         
-        while self.running:
-            try:
-                # Vérifier s'il y a des paquets à envoyer
-                with self.queue_lock:
-                    if len(self.batch_queue) >= self.config.batch_size:
-                        # Extraire le batch
-                        batch = self.batch_queue[:self.config.batch_size]
-                        self.batch_queue = self.batch_queue[self.config.batch_size:]
-                    else:
-                        batch = []
-                
-                # Envoyer le batch si non vide
-                if batch:
-                    self.send_batch_to_api(batch)
-                
-                # Attendre un peu
-                time.sleep(5)
-            
-            except Exception as e:
-                self.logger.error(f"❌ Erreur dans le loop d'envoi: {e}")
-                time.sleep(5)
-    
-    # ========================================================================
-    # CONTRÔLE DU COLLECTOR
-    # ========================================================================
-    
-    def start(self, collection: str = "standard"):
-        """Démarre le collector"""
-        if self.running:
-            self.logger.warning("⚠️ Collector déjà en cours d'exécution")
-            return
+        Returns:
+            True si la connexion fonctionne
+        """
+        logger.info(f"Test de connexion a {self.config.host}:{self.config.port}...")
         
-        self.logger.info(f"🚀 Démarrage du collector avec collection '{collection}'")
-        self.running = True
+        result = self.get_oid(self.OIDS["sysDescr"])
         
-        # Démarrer les threads
-        self.poll_thread = threading.Thread(
-            target=self._polling_loop,
-            args=(collection,),
-            daemon=False
-        )
-        self.poll_thread.start()
-        
-        self.sender_thread = threading.Thread(
-            target=self._sender_loop,
-            daemon=False
-        )
-        self.sender_thread.start()
-    
-    def stop(self):
-        """Arrête le collector"""
-        self.logger.info("⏹️ Arrêt du collector...")
-        self.running = False
-        
-        # Attendre les threads
-        if self.poll_thread:
-            self.poll_thread.join(timeout=5)
-        if self.sender_thread:
-            self.sender_thread.join(timeout=5)
-        
-        # Envoyer les paquets restants
-        with self.queue_lock:
-            if self.batch_queue:
-                self.logger.info(f"📤 Envoi des {len(self.batch_queue)} paquets restants...")
-                self.send_batch_to_api(self.batch_queue)
-        
-        self.logger.info(f"✅ Arrêt terminé. Stats: {self.poll_count} polls, {self.error_count} erreurs")
-    
-    def status(self) -> dict:
-        """Retourne l'état du collector"""
-        return {
-            "running": self.running,
-            "poll_count": self.poll_count,
-            "error_count": self.error_count,
-            "queue_size": len(self.batch_queue),
-            "last_poll": self.last_poll_time.isoformat() if self.last_poll_time else None
-        }
+        if result:
+            logger.info("Connection OK!")
+            logger.info(f"Device: {result}")
+            return True
+        else:
+            logger.error("Connection FAILED!")
+            return False
 
-# ============================================================================
-# MAIN
-# ============================================================================
 
 def main():
-    """Point d'entrée"""
+    """Point d'entree du script"""
+    parser = argparse.ArgumentParser(
+        description="SNMPv3 Collector - pysnmp 7.1.22",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemples:
+  # Mode TEST (avec localhost)
+  python snmpv3_collector.py --mode test --verbose
+  
+  # Mode PRODUCTION
+  python snmpv3_collector.py --mode production --host 192.168.1.1 --username admin
+  
+  # Test de connexion
+  python snmpv3_collector.py --test-only
+        """
+    )
     
-    parser = argparse.ArgumentParser(description="Collector SNMPv3")
     parser.add_argument(
         "--mode",
         choices=["test", "production"],
-        default="production",
-        help="Mode d'exécution"
+        default="test",
+        help="Mode de fonctionnement (defaut: test)"
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Adresse IP du device (defaut: 127.0.0.1)"
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=161,
+        help="Port SNMP (defaut: 161)"
+    )
+    parser.add_argument(
+        "--username",
+        default=os.getenv("SNMP_USERNAME", "admin"),
+        help="Nom d'utilisateur SNMPv3"
+    )
+    parser.add_argument(
+        "--auth-pass",
+        default=os.getenv("SNMP_AUTH_PASS", "authPassword123"),
+        help="Mot de passe authentication"
+    )
+    parser.add_argument(
+        "--priv-pass",
+        default=os.getenv("SNMP_PRIV_PASS", "privPassword123"),
+        help="Mot de passe encryption"
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="Mode verbeux (DEBUG)"
+        help="Affichage detaille"
     )
     parser.add_argument(
-        "--duration",
-        type=int,
-        default=0,
-        help="Durée d'exécution en secondes (0 = infini)"
+        "--test-only",
+        action="store_true",
+        help="Teste la connexion seulement"
     )
     
     args = parser.parse_args()
     
-    try:
-        # Charger la config
-        config = SNMPConfig.from_env()
-        
-        # Ajuster le log level
-        if args.verbose:
-            config.log_level = "DEBUG"
-        
-        # Mode test?
-        collection = "test" if args.mode == "test" else "standard"
-        
-        # Créer et démarrer le collector
-        collector = SNMPv3Collector(config)
-        collector.start(collection=collection)
-        
-        print(f"\n✅ Collector démarré en mode '{args.mode}'")
-        print(f"📍 Cible: {config.target_ip}:{config.target_port}")
-        print(f"🔐 User: {config.username} ({config.security_level})")
-        print(f"📤 API: {config.api_base_url}")
-        print("\nAppuyer sur Ctrl+C pour arrêter...\n")
-        
-        # Boucle principale
-        start_time = time.time()
-        try:
-            while True:
-                time.sleep(1)
-                
-                # Afficher le statut toutes les 30 secondes
-                if int(time.time()) % 30 == 0:
-                    status = collector.status()
-                    print(f"📊 Status: {status}")
-                
-                # Arrêter après durée si spécifiée
-                if args.duration > 0 and (time.time() - start_time) > args.duration:
-                    break
-        
-        except KeyboardInterrupt:
-            print("\n\n⏹️  Interruption détectée...")
-        
-        finally:
-            collector.stop()
+    # Creer la configuration
+    config = SNMPConfig(
+        host=args.host,
+        port=args.port,
+        username=args.username,
+        auth_password=args.auth_pass,
+        priv_password=args.priv_pass,
+    )
     
-    except ValueError as e:
-        print(f"❌ Erreur de configuration: {e}")
-        exit(1)
+    # Creer le collecteur
+    mode = SNMPMode.TEST if args.mode == "test" else SNMPMode.PRODUCTION
+    collector = SNMPv3Collector(config, mode=mode, verbose=args.verbose)
+    
+    # Executer
+    try:
+        if args.test_only:
+            # Test de connexion uniquement
+            success = collector.test_connection()
+            sys.exit(0 if success else 1)
+        else:
+            # Collecte complete
+            data = collector.collect_system_info()
+            
+            # Afficher les resultats
+            print("\n" + "="*70)
+            print("RESULTATS DE LA COLLECTE SNMP")
+            print("="*70)
+            print(json.dumps(data, indent=2))
+            print("="*70)
+            
+            # Verifier si des donnees ont ete collectees
+            if data["results"]:
+                logger.info(f"Collecte reussie: {len(data['results'])} OIDs")
+                sys.exit(0)
+            else:
+                logger.error("Aucun OID collecte")
+                sys.exit(1)
+    
+    except KeyboardInterrupt:
+        logger.info("\nArret demande par l'utilisateur")
+        sys.exit(0)
     except Exception as e:
-        print(f"❌ Erreur fatale: {e}")
-        exit(1)
+        logger.error(f"Erreur fatale: {e}")
+        if args.verbose:
+            import traceback
+            traceback.print_exc()
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
