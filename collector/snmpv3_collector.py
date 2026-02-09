@@ -3,6 +3,7 @@
 SNMPv3 Collector - pysnmp 7.1.22 FONCTIONNEL
 Collecte les donnees SNMP d'un switch et les envoie a l'API
 VERSION CORRIGEE: API async correcte pour pysnmp 7.1.22
+FIX: Force SHA auth + DES priv
 """
 
 import os
@@ -35,8 +36,8 @@ class SNMPConfig:
     """Configuration SNMPv3"""
     host: str = "192.168.1.1"
     port: int = 161
-    timeout: int = 2
-    retries: int = 3
+    timeout: int = 5
+    retries: int = 2
     username: str = "admin"
     auth_password: str = ""
     priv_password: str = ""
@@ -93,16 +94,23 @@ class SNMPv3Collector:
                 ObjectIdentity,
                 get_cmd,
             )
+            from pysnmp.security import usm
             
             snmp_engine = SnmpEngine()
             
             try:
-                # Creer l'utilisateur SNMPv3
+                # Creer l'utilisateur SNMPv3 avec SHA auth et DES priv
                 user_data = UsmUserData(
                     userName=self.config.username,
                     authKey=self.config.auth_password,
                     privKey=self.config.priv_password,
+                    authProtocol=usm.usmHMACSHAAuthProtocol,  # SHA (pas MD5)
+                    privProtocol=usm.usmDESPrivProtocol,       # DES (pas AES)
                 )
+                
+                if self.verbose:
+                    logger.debug(f"Auth protocol: SHA")
+                    logger.debug(f"Priv protocol: DES")
                 
                 # Configuration de la cible (ASYNC!)
                 target = await UdpTransportTarget.create(
