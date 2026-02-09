@@ -14,6 +14,8 @@ from pysnmp.hlapi.v3arch.asyncio import (
     ObjectType,
     ObjectIdentity,
     get_cmd,
+    usmHMACSHAAuthProtocol,
+    usmDESPrivProtocol,
 )
 
 
@@ -28,15 +30,16 @@ async def test_snmp(host, port, username, auth_pass, priv_pass):
     snmp_engine = SnmpEngine()
     
     try:
-        # Creer l'utilisateur avec auth/priv en texte clair
-        # pysnmp 7.1.22 utilisera les defaults ou peut detecter
+        # Creer l'utilisateur avec SHA + DES explicitement
         user_data = UsmUserData(
             userName=username,
             authKey=auth_pass,
+            authProtocol=usmHMACSHAAuthProtocol,
             privKey=priv_pass,
+            privProtocol=usmDESPrivProtocol,
         )
         
-        print("[*] UsmUserData cree...")
+        print("[*] UsmUserData cree (SHA+DES)...")
         
         # Target avec timeout plus long pour debug
         target = await UdpTransportTarget.create(
