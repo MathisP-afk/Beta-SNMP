@@ -108,6 +108,14 @@ class PostClexAPI(BaseModel):
     """Modèle pour la création d'une clé API"""
     description: Annotated[str, Field(default="Clé API générée via l'API", description="Description de la clé")]
 
+class CollectorDataIngest(BaseModel):
+    """Modèle pour l'ingestion de données du collector SNMP"""
+    timestamp: str
+    cycle: int
+    mode: str
+    host: str
+    results: Dict[str, Any]
+
 # ============================================================================
 # ENDPOINTS - GESTION DES UTILISATEURS
 # ============================================================================
@@ -456,6 +464,44 @@ def snmp_statistics(api_key: str = Depends(validate_api_key)) -> Dict[str, Any]:
         "statistiques": stats,
         "authorized_by": api_key
     }
+
+# ============================================================================
+# ENDPOINTS - COLLECTOR DATA INGESTION
+# ============================================================================
+
+@app.post("/api/snmp/data/ingest",
+    summary="Ingérer les données du collector SNMP",
+    description="Endpoint pour recevoir les données collectées par le collector SNMPv3",
+    tags=["Collector"],
+    responses={200: {"description": "Données reçues"}, 400: {"description": "Données invalides"}}
+)
+def ingest_collector_data(
+    data: CollectorDataIngest
+) -> Dict[str, Any]:
+    """Reçoit et traite les données du collector"""
+    try:
+        # Log des données reçues
+        print(f"[COLLECTOR] Cycle {data.cycle} - Mode {data.mode} - Host {data.host}")
+        print(f"[COLLECTOR] {len(data.results)} OIDs reçus: {list(data.results.keys())}")
+        
+        # Pour l'instant on log seulement
+        # Plus tard: stocker dans PostgreSQL
+        
+        return {
+            "status": "success",
+            "message": f"Données du cycle {data.cycle} reçues et traitées",
+            "cycle": data.cycle,
+            "host": data.host,
+            "oids_count": len(data.results),
+            "mode": data.mode,
+            "timestamp": data.timestamp
+        }
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Erreur lors de l'ingestion: {str(e)}"
+        )
 
 # ============================================================================
 # ENDPOINTS - SANTÉ DE L'API
