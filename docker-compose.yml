@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Container
+  postgres:
+    image: postgres:15-alpine
+    container_name: snmp_postgres
+    environment:
+      POSTGRES_DB: snmp_db
+      POSTGRES_USER: snmp_user
+      POSTGRES_PASSWORD: snmp_password_secure_123
+      POSTGRES_INITDB_ARGS: "-c client_encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      # Persiste les donnees entre les redemarrages
+      - postgres_data:/var/lib/postgresql/data
+      # Script d'initialisation SQL (optionnel)
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U snmp_user -d snmp_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - snmp_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  snmp_network:
+    driver: bridge
