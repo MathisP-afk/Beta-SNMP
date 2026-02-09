@@ -3,7 +3,7 @@
 SNMPv3 Collector - pysnmp 7.1.22 FONCTIONNEL
 Collecte les donnees SNMP d'un switch et les envoie a l'API
 VERSION CORRIGEE: API async correcte pour pysnmp 7.1.22
-FIX: Utilise hlapi.v3arch.asyncio directement
+FIX: Utilise hlapi.v3arch.asyncio directement + force SHA/DES comme le SG250
 """
 
 import os
@@ -93,17 +93,20 @@ class SNMPv3Collector:
                 ObjectType,
                 ObjectIdentity,
                 get_cmd,
+                usmHMACSHAAuthProtocol,
+                usmDESPrivProtocol,
             )
             
             snmp_engine = SnmpEngine()
             
             try:
-                # Creer l'utilisateur SNMPv3
-                # authProtocol et privProtocol sont automatiquement detectes depuis le contexte
+                # Creer l'utilisateur SNMPv3 en forçant SHA + DES (comme le SG250)
                 user_data = UsmUserData(
                     userName=self.config.username,
                     authKey=self.config.auth_password,
+                    authProtocol=usmHMACSHAAuthProtocol,
                     privKey=self.config.priv_password,
+                    privProtocol=usmDESPrivProtocol,
                 )
                 
                 if self.verbose:
