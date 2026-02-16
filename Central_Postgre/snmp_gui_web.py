@@ -262,7 +262,7 @@ class SNMPMonitorApp:
                     color = ft.Colors.PINK_700
                 elif 'REPORT' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.CONNECT_WITHOUT_CONTACT
-                    color = ft.Colors.BLUE_700
+                    color = ft.Colors.PURPLE
 
                 recent_rows.append(
                     ft.ListTile(
@@ -321,7 +321,7 @@ class SNMPMonitorApp:
                 ft.Card(
                     content=ft.Container(
                         content=ft.Column([
-                            ft.Row([ft.Icon(ft.Icons.CONNECT_WITHOUT_CONTACT, size=35, color=ft.Colors.BLUE_700),
+                            ft.Row([ft.Icon(ft.Icons.CONNECT_WITHOUT_CONTACT, size=35, color=ft.Colors.PURPLE),
                                    ft.Text(str(self.stats["report_requests"]), size=26, weight=ft.FontWeight.BOLD)],
                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                             ft.Text("Reports SNMPv3", size=14, color=ft.Colors.GREY_600),
