@@ -265,11 +265,11 @@ class SNMPMonitorApp:
                     ft.ListTile(
                         leading=ft.CircleAvatar(content=ft.Icon(icon, color=ft.Colors.WHITE), bgcolor=color),
                         title=ft.Text(f"{pkt.get('type_pdu', 'Unknown')}"),
-                        subtitle=ft.Text(f"{pkt.get('adresse_source')} → {pkt.get('oid_racine', 'N/A')}"),
+                        subtitle=ft.Text(f"[{pkt.get('version_snmp', '?')}] {pkt.get('adresse_source')} → {pkt.get('oid_racine', 'N/A')}"),
                         trailing=ft.Text(str(pkt.get('timestamp_reception'))[11:19], color=ft.Colors.GREY_500)
                     )
                 )
-            
+
             if not recent_rows:
                 recent_rows.append(ft.Text("Aucune activité récente", italic=True, color=ft.Colors.GREY))
 
@@ -363,26 +363,56 @@ class SNMPMonitorApp:
         def create_traffic_page():
             traffic_table_ref = ft.Ref[ft.DataTable]()
             
-            def load_traffic_data(ip_source=None, pdu_type=None):
-                """Charge les données depuis la BDD avec filtres"""
+            PAGE_SIZE = 100
+            pagination_state = {"current_page": 0}
+            page_info_text = ft.Text("Page 1 / 1", size=13)
+            btn_prev = ft.IconButton(icon=ft.Icons.ARROW_BACK, tooltip="Page précédente", disabled=True)
+            btn_next = ft.IconButton(icon=ft.Icons.ARROW_FORWARD, tooltip="Page suivante", disabled=True)
+
+            def load_traffic_data(ip_source=None, pdu_type=None, version=None, page_num=0):
+                """Charge les données depuis la BDD avec filtres et pagination côté SQL"""
                 rows = []
+                total = 0
+                total_pages = 1
                 if self.db:
-                    # 1. Récupération via BDD (Filtre IP supporté nativement)
+                    cursor = self.db.connection.cursor()
+
+                    # Construction dynamique de la clause WHERE
+                    conditions = []
+                    params = []
                     if ip_source and ip_source.strip():
-                        paquets = self.db.rechercher_paquets(adresse_source=ip_source)
-                    else:
-                        paquets = self.db.lister_paquets_snmp(limite=50)
-                    
-                    # 2. Filtrage Python pour le Type (non supporté par rechercher_paquets)
-                    for p in paquets:
+                        conditions.append("adresse_source = ?")
+                        params.append(ip_source.strip())
+                    if pdu_type and pdu_type != "Tous":
+                        conditions.append("UPPER(type_pdu) LIKE ?")
+                        params.append(f"%{pdu_type.upper()}%")
+                    if version and version != "Toutes":
+                        conditions.append("LOWER(version_snmp) = ?")
+                        params.append(version.lower())
+
+                    where = ""
+                    if conditions:
+                        where = "WHERE " + " AND ".join(conditions)
+
+                    # 1. Comptage total (pour la pagination)
+                    cursor.execute(f"SELECT COUNT(*) FROM paquets_recus {where}", params)
+                    total = cursor.fetchone()[0]
+
+                    # 2. Pagination
+                    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+                    page_num = max(0, min(page_num, total_pages - 1))
+                    pagination_state["current_page"] = page_num
+                    offset = page_num * PAGE_SIZE
+
+                    # 3. Récupération de la page courante uniquement
+                    cursor.execute(
+                        f"SELECT * FROM paquets_recus {where} ORDER BY timestamp_reception DESC LIMIT ? OFFSET ?",
+                        params + [PAGE_SIZE, offset]
+                    )
+
+                    for row in cursor.fetchall():
+                        p = dict(row)
                         t_pdu = str(p.get('type_pdu', 'Unknown'))
-                        
-                        # Application du filtre Type si sélectionné
-                        if pdu_type and pdu_type != "Tous":
-                            if pdu_type.upper() not in t_pdu.upper():
-                                continue # On saute ce paquet
-                        
-                        # Détermination status/couleur
                         status = "OK"
                         status_color = ft.Colors.GREEN
                         if str(p.get('error_status', '0')) != '0':
@@ -396,6 +426,14 @@ class SNMPMonitorApp:
                             ft.DataRow(cells=[
                                 ft.DataCell(ft.Text(str(p['timestamp_reception'])[11:19], size=12)),
                                 ft.DataCell(ft.Text(p['adresse_source'], size=12, weight=ft.FontWeight.BOLD)),
+                                ft.DataCell(
+                                    ft.Container(
+                                        ft.Text(str(p.get('version_snmp', 'N/A')), color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                        bgcolor=ft.Colors.TEAL if str(p.get('version_snmp', '')).lower() == 'v3' else ft.Colors.BLUE_GREY,
+                                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                        border_radius=4
+                                    )
+                                ),
                                 ft.DataCell(
                                     ft.Container(
                                         ft.Text(t_pdu[:15], color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
@@ -415,16 +453,30 @@ class SNMPMonitorApp:
                                 ),
                             ])
                         )
-                
+
                 if traffic_table_ref.current:
                     traffic_table_ref.current.rows = rows
-                    page.update()
+                page_info_text.value = f"Page {pagination_state['current_page'] + 1} / {total_pages}  ({total} paquets)"
+                btn_prev.disabled = pagination_state["current_page"] <= 0
+                btn_next.disabled = pagination_state["current_page"] >= total_pages - 1
+                page.update()
 
             def filter_traffic(e=None):
+                pagination_state["current_page"] = 0
                 ip = ip_filter.value
                 typ = type_filter.value
-                load_traffic_data(ip, typ)
+                ver = version_filter.value
+                load_traffic_data(ip, typ, ver, 0)
                 self.show_snackbar(page, "Filtres appliqués (Recherche BDD)", ft.Colors.BLUE)
+
+            def go_prev(e):
+                load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"] - 1)
+
+            def go_next(e):
+                load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"] + 1)
+
+            btn_prev.on_click = go_prev
+            btn_next.on_click = go_next
 
             # Filtres UI
             ip_filter = ft.TextField(
@@ -445,13 +497,25 @@ class SNMPMonitorApp:
                 width=150,
                 on_change=filter_traffic
             )
-            
+
+            version_filter = ft.Dropdown(
+                hint_text="Version SNMP",
+                options=[
+                    ft.dropdown.Option("Toutes"),
+                    ft.dropdown.Option("v2c"),
+                    ft.dropdown.Option("v3")
+                ],
+                width=150,
+                on_change=filter_traffic
+            )
+
             # Table
             traffic_table = ft.DataTable(
                 ref=traffic_table_ref,
                 columns=[
                     ft.DataColumn(ft.Text("Heure", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Source", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Version", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Type", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("OID", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Statut", weight=ft.FontWeight.BOLD)),
@@ -460,24 +524,24 @@ class SNMPMonitorApp:
             )
             
             # Chargement initial
-            # On utilise un petit délai pour laisser le temps au composant de se monter
-            # (ou on appelle juste après le return mais dans Flet c'est synchrone ici)
-            load_traffic_data() 
+            load_traffic_data()
 
             return ft.Column([
                 ft.Row([
                     ft.Text("Traffic SNMP (BDD)", size=24, weight=ft.FontWeight.BOLD),
-                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=lambda e: load_traffic_data(ip_filter.value, type_filter.value))
+                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=lambda e: load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"]))
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Container(height=15),
-                ft.Row([ip_filter, type_filter, ft.ElevatedButton("Filtrer", on_click=filter_traffic)], spacing=15),
+                ft.Row([ip_filter, type_filter, version_filter, ft.ElevatedButton("Filtrer", on_click=filter_traffic)], spacing=15),
                 ft.Container(height=25),
                 ft.Card(
                     content=ft.Container(
                         content=ft.Column([
                             ft.Text("Paquets enregistrés", size=14, color=ft.Colors.GREY_600),
                             ft.Container(height=10),
-                            traffic_table
+                            traffic_table,
+                            ft.Container(height=10),
+                            ft.Row([btn_prev, page_info_text, btn_next], alignment=ft.MainAxisAlignment.CENTER),
                         ]), padding=15
                     ), elevation=2
                 )
