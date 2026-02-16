@@ -531,7 +531,7 @@ class SNMPDatabase:
         
         if cursor.rowcount > 0:
             with open(self.log_file, 'a') as lf:
-                lf.write("[" + datetime.now().strftime('%d-%m-%Y_%H:%M:%S') + f"] - Clé API {cle_hash} désactivée avec succès.\n")
+                lf.write("[" + datetime.now().strftime('%d-%m-%Y_%H:%M:%S') + f"] - Clé API ID {id} désactivée avec succès.\n")
             return True        
         return False
 
