@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Environnement
+.env
+*.env
+!.env.example
+
+# Base de donnees
+*.db
+
+# Logs
+*.log
+logs_*.log
+
+# Certificats SSL
+ssl/*.pem
+**/ssl/*.pem
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+Thumbs.db
+.DS_Store

@@ -13,13 +13,7 @@ import json
 # INITIALISATION DE L'API ET DE LA BASE DE DONNÉES
 # ============================================================================
 
-db = SNMPDatabase(
-    host="localhost",           # ou le hostname du conteneur Docker
-    port=5432,
-    database="snmpdatabase",
-    user="SylvAdminBDD",
-    password="LptVmonFFVnmQUX97r597mmHqREqhBr8"
-)
+db = SNMPDatabase()
 db.ajouter_cle_api(description="Clé initiale générée au démarrage de l'API")
 app = FastAPI(
     title="API SNMP Monitoring",

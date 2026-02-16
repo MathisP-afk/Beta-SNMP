@@ -1,3 +1,4 @@
+import os
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor
@@ -14,12 +15,13 @@ class SNMPDatabase:
     """
     
     # On adapte les arguments par défaut pour coller à ton Docker Compose
-    def __init__(self, 
-                 host: str = "localhost",
-                 port: int = 5432,
-                 database: str = "snmpdatabase",
-                 user: str = "SylvAdminBDD",
-                 password: str = "LptVmonFFVnmQUX97r597mmHqREqhBr8",
+    # Les credentials sont lues depuis les variables d'environnement (fichier .env)
+    def __init__(self,
+                 host: str = os.environ.get("POSTGRES_HOST", "localhost"),
+                 port: int = int(os.environ.get("POSTGRES_PORT", "5432")),
+                 database: str = os.environ.get("POSTGRES_DB", "snmpdatabase"),
+                 user: str = os.environ.get("POSTGRES_USER", "SylvAdminBDD"),
+                 password: str = os.environ.get("POSTGRES_PASSWORD", ""),
                  log_file: str = "logs_"+datetime.now().strftime('%d-%m-%Y')+".log"):
         """
         Initialise la connexion à la base de données PostgreSQL
