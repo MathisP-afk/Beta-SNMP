@@ -1,4 +1,6 @@
 import os
+from dotenv import load_dotenv
+load_dotenv()
 import psycopg2
 from psycopg2 import sql
 from psycopg2.extras import RealDictCursor

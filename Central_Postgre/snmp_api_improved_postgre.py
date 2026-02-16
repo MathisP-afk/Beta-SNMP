@@ -1,6 +1,9 @@
 # API SNMP AMÉLIORÉE - FastAPI avec gestion des clés API en BDD
 # Adaptée pour la nouvelle version de snmp_database.py
 
+import os
+from dotenv import load_dotenv
+load_dotenv()
 from snmp_database_postgre import SNMPDatabase  # ← Remplace snmp_database
 from fastapi import FastAPI, HTTPException, Depends, status
 from pydantic import BaseModel, Field, field_validator

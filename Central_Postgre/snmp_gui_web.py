@@ -9,6 +9,9 @@ Adaptations:
 ✅ Dashboard avec statistiques réelles
 """
 
+import os
+from dotenv import load_dotenv
+load_dotenv()
 import flet as ft
 from datetime import datetime
 

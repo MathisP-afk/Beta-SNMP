@@ -4,6 +4,7 @@ requests
 fastapi
 uvicorn
 pydantic
+python-dotenv
 
 # Interface graphique
 flet
