@@ -237,18 +237,21 @@ class SNMPMonitorApp:
             for pkt in recent_packets:
                 icon = ft.Icons.HELP_OUTLINE
                 color = ft.Colors.GREY
-                if 'GET' in str(pkt.get('type_pdu', '')):
+                if 'GET' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.GET_APP
                     color = ft.Colors.GREEN
-                elif 'SET' in str(pkt.get('type_pdu', '')):
+                elif 'SET' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.SEND
                     color = ft.Colors.ORANGE
-                elif 'TRAP' in str(pkt.get('type_pdu', '')):
+                elif 'TRAP' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.WARNING
                     color = ft.Colors.RED
-                elif 'RESPONSE' in str(pkt.get('type_pdu', '')):
+                elif 'RESPONSE' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.TRY_SMS_STAR_ROUNDED
                     color = ft.Colors.PINK_700
+                elif 'REPORT' in str(pkt.get('type_pdu', '')).upper():
+                    icon = ft.Icons.CONNECT_WITHOUT_CONTACT
+                    color = ft.Colors.BLUE_700
 
                 recent_rows.append(
                     ft.ListTile(

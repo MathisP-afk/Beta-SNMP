@@ -13,7 +13,7 @@ import flet as ft
 from datetime import datetime
 
 # Import de la classe fournie
-from snmp_database_postgre import SNMPDatabase  # ← Remplace snmp_database
+from snmp_database import SNMPDatabase
 
 
 class SNMPMonitorApp:
@@ -25,16 +25,10 @@ class SNMPMonitorApp:
         # Initialisation de la connexion BDD
 
         try:
-            self.db = SNMPDatabase(
-                host="localhost",
-                port=5432,
-                database="snmpdatabase",
-                user="SylvAdminBDD",
-                password="LptVmonFFVnmQUX97r597mmHqREqhBr8"
-            )
-            print("✅ Connexion BDD PostgreSQL réussie dans l'interface graphique")
+            self.db = SNMPDatabase("exemple_snmp.db")
+            print("✅ Connexion BDD SQLite réussie dans l'interface graphique")
         except Exception as e:
-            print(f"❌ Erreur connexion PostgreSQL: {e}")
+            print(f"❌ Erreur connexion SQLite: {e}")
             self.db = None
 
     def show_snackbar(self, page, message, bgcolor=ft.Colors.GREEN):
@@ -252,6 +246,9 @@ class SNMPMonitorApp:
                 elif 'RESPONSE' in str(pkt.get('type_pdu', '')):
                     icon = ft.Icons.TRY_SMS_STAR_ROUNDED
                     color = ft.Colors.PINK_700
+                elif 'REPORT' in str(pkt.get('type_pdu', '')).upper():
+                    icon = ft.Icons.CONNECT_WITHOUT_CONTACT
+                    color = ft.Colors.BLUE_700
 
                 recent_rows.append(
                     ft.ListTile(
