@@ -4,7 +4,8 @@ requests
 fastapi
 uvicorn
 pydantic
-python-dotenv
+pysnmp
+pycryptodomex
 
 # Interface graphique
 flet
