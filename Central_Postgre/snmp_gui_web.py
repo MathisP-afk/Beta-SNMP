@@ -51,6 +51,7 @@ class SNMPMonitorApp:
         if not self.db:
             return {
                 "total_requests": 0, "get_requests": 0, "set_requests": 0,
+                "response_requests": 0, "report_requests": 0,
                 "errors": 0, "last_update": datetime.now().strftime("%H:%M:%S")
             }
 
@@ -69,6 +70,14 @@ class SNMPMonitorApp:
             cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE type_pdu LIKE '%Set%'")
             set_req = cursor.fetchone()[0]
 
+            # RESPONSE
+            cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE UPPER(type_pdu) LIKE '%RESPONSE%'")
+            response_req = cursor.fetchone()[0]
+
+            # REPORT (SNMPv3)
+            cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE UPPER(type_pdu) LIKE '%REPORT%'")
+            report_req = cursor.fetchone()[0]
+
             # Erreurs (status != 0)
             cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE error_status != '0' AND error_status IS NOT NULL")
             errors = cursor.fetchone()[0]
@@ -77,12 +86,14 @@ class SNMPMonitorApp:
                 "total_requests": total,
                 "get_requests": get_req,
                 "set_requests": set_req,
+                "response_requests": response_req,
+                "report_requests": report_req,
                 "errors": errors,
                 "last_update": datetime.now().strftime("%H:%M:%S")
             }
         except Exception as e:
             print(f"Erreur stats dashboard: {e}")
-            return {"total_requests": 0, "get_requests": 0, "set_requests": 0, "errors": 0, "last_update": "Erreur"}
+            return {"total_requests": 0, "get_requests": 0, "set_requests": 0, "response_requests": 0, "report_requests": 0, "errors": 0, "last_update": "Erreur"}
 
     def get_recent_activity(self, limit=5):
         """Récupère les derniers paquets pour l'activité récente"""
@@ -294,6 +305,26 @@ class SNMPMonitorApp:
                                    ft.Text(str(self.stats["set_requests"]), size=26, weight=ft.FontWeight.BOLD)],
                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                             ft.Text("SET Requests", size=14, color=ft.Colors.GREY_600),
+                        ]), padding=20, width=220
+                    ), elevation=2
+                ),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([ft.Icon(ft.Icons.TRY_SMS_STAR_ROUNDED, size=35, color=ft.Colors.PINK_700),
+                                   ft.Text(str(self.stats["response_requests"]), size=26, weight=ft.FontWeight.BOLD)],
+                                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Text("Responses", size=14, color=ft.Colors.GREY_600),
+                        ]), padding=20, width=220
+                    ), elevation=2
+                ),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([ft.Icon(ft.Icons.CONNECT_WITHOUT_CONTACT, size=35, color=ft.Colors.BLUE_700),
+                                   ft.Text(str(self.stats["report_requests"]), size=26, weight=ft.FontWeight.BOLD)],
+                                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Text("Reports SNMPv3", size=14, color=ft.Colors.GREY_600),
                         ]), padding=20, width=220
                     ), elevation=2
                 ),
