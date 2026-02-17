@@ -10,10 +10,13 @@ Description: Collecteur SNMP hybride supportant v2c et v3.
              - Envoi à l'API REST (/snmp/v2c/add ou /snmp/v3/add)
 
 Dépendances:
-    pip install pysnmp pycryptodomex cryptography requests scapy
+    pip install pysnmp pycryptodomex cryptography requests scapy python-dotenv
 
 Usage:
-    # Capture passive v2c uniquement
+    # Configurer le fichier .env puis lancer sans arguments
+    python snmp_collector_unified.py
+
+    # Ou surcharger via arguments CLI (prioritaires sur le .env)
     python snmp_collector_unified.py -a https://API:8000 -k CLE -i "Ethernet 2"
 
     # Capture passive v2c+v3 + polling actif v3
@@ -26,6 +29,7 @@ import asyncio
 import hashlib
 import datetime
 import sys
+import os
 import argparse
 import threading
 import queue
@@ -35,6 +39,10 @@ import time
 import re
 from typing import Dict, List, Optional
 import urllib3
+from dotenv import load_dotenv
+
+# Charger le .env depuis le même dossier que le script
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -1258,19 +1266,24 @@ Exemples:
         """
     )
 
-    # Requis
-    parser.add_argument('-a', '--api', required=True,
-                        help="URL de l'API (ex: https://10.204.0.158:8000)")
-    parser.add_argument('-k', '--key', required=True,
-                        help="Clé API pour l'authentification")
+    # Requis (sauf si défini dans .env)
+    parser.add_argument('-a', '--api',
+                        default=os.environ.get('SNMP_API_URL'),
+                        help="URL de l'API (env: SNMP_API_URL)")
+    parser.add_argument('-k', '--key',
+                        default=os.environ.get('SNMP_API_KEY'),
+                        help="Clé API (env: SNMP_API_KEY)")
 
     # Optionnel (général)
-    parser.add_argument('-i', '--interface', default=None,
-                        help='Interface réseau pour Scapy (ex: "Ethernet 2")')
-    parser.add_argument('-w', '--workers', type=int, default=3,
-                        help='Nombre de threads workers (défaut: 3)')
-    parser.add_argument('-p', '--port', type=int, default=162,
-                        help="Port d'écoute (défaut: 162)")
+    parser.add_argument('-i', '--interface',
+                        default=os.environ.get('SNMP_INTERFACE'),
+                        help='Interface réseau pour Scapy (env: SNMP_INTERFACE)')
+    parser.add_argument('-w', '--workers', type=int,
+                        default=int(os.environ.get('SNMP_WORKERS', '3')),
+                        help='Nombre de threads workers (env: SNMP_WORKERS, défaut: 3)')
+    parser.add_argument('-p', '--port', type=int,
+                        default=int(os.environ.get('SNMP_PORT', '162')),
+                        help="Port d'écoute (env: SNMP_PORT, défaut: 162)")
     parser.add_argument('-q', '--quiet', action='store_true',
                         help='Mode silencieux')
 
@@ -1278,20 +1291,32 @@ Exemples:
     v3_group = parser.add_argument_group(
         'SNMPv3 (optionnel)',
         'Paramètres pour le polling actif et le déchiffrement v3')
-    v3_group.add_argument('-s', '--switch', default=None,
-                          help='Adresse IP du switch (active le polling v3)')
-    v3_group.add_argument('-u', '--username', default=None,
-                          help="Nom d'utilisateur SNMPv3")
-    v3_group.add_argument('--auth-password', default=None,
-                          help="Mot de passe d'authentification (SHA)")
-    v3_group.add_argument('--priv-password', default=None,
-                          help='Mot de passe de chiffrement (DES)')
-    v3_group.add_argument('-e', '--engine-id', default=None,
-                          help='Engine ID du switch en hexadécimal')
-    v3_group.add_argument('--poll-interval', type=int, default=60,
-                          help='Intervalle entre polls actifs (défaut: 60s)')
+    v3_group.add_argument('-s', '--switch',
+                          default=os.environ.get('SNMP_SWITCH_IP'),
+                          help='Adresse IP du switch (env: SNMP_SWITCH_IP)')
+    v3_group.add_argument('-u', '--username',
+                          default=os.environ.get('SNMP_V3_USERNAME'),
+                          help="Nom d'utilisateur SNMPv3 (env: SNMP_V3_USERNAME)")
+    v3_group.add_argument('--auth-password',
+                          default=os.environ.get('SNMP_V3_AUTH_PASSWORD'),
+                          help="Mot de passe auth SHA (env: SNMP_V3_AUTH_PASSWORD)")
+    v3_group.add_argument('--priv-password',
+                          default=os.environ.get('SNMP_V3_PRIV_PASSWORD'),
+                          help='Mot de passe chiffrement DES (env: SNMP_V3_PRIV_PASSWORD)')
+    v3_group.add_argument('-e', '--engine-id',
+                          default=os.environ.get('SNMP_V3_ENGINE_ID'),
+                          help='Engine ID en hexadécimal (env: SNMP_V3_ENGINE_ID)')
+    v3_group.add_argument('--poll-interval', type=int,
+                          default=int(os.environ.get('SNMP_POLL_INTERVAL', '60')),
+                          help='Intervalle entre polls actifs (env: SNMP_POLL_INTERVAL, défaut: 60s)')
 
     args = parser.parse_args()
+
+    # Vérifier que API et KEY sont définis (via .env ou CLI)
+    if not args.api:
+        parser.error("URL de l'API requise (-a ou SNMP_API_URL dans .env)")
+    if not args.key:
+        parser.error("Clé API requise (-k ou SNMP_API_KEY dans .env)")
 
     if args.quiet:
         logging.getLogger().setLevel(logging.WARNING)

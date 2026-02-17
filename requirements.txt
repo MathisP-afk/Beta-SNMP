@@ -6,6 +6,7 @@ uvicorn
 pydantic
 pysnmp
 pycryptodomex
+python-dotenv
 
 # Interface graphique
 flet
