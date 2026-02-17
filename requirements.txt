@@ -10,6 +10,10 @@ pycryptodomex
 # Interface graphique
 flet
 
+# Alertes SMS
+twilio
+python-dotenv
+
 # Outils de test et qualité (pour la pipeline)
 pytest
 httpx

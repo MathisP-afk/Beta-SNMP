@@ -269,7 +269,7 @@ def add_snmp_v2c(
     try:
         # Construction du contenu avec VarBinds
         contenu = trame.contenu or {"varbinds": []}
-        
+
         success = db.ajouter_paquet_snmp(
             version_snmp="v2c",
             adresse_source=trame.source_ip,
@@ -285,13 +285,13 @@ def add_snmp_v2c(
             type_pdu=trame.type_pdu,
             agent_snmp="FastAPI SNMP Monitor v2.0"
         )
-        
+
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Erreur lors de l'enregistrement de la trame"
             )
-        
+
         return {
             "status": "success",
             "message": "Trame SNMP v2c enregistrée avec succès",
@@ -302,7 +302,7 @@ def add_snmp_v2c(
             "request_id": trame.request_id,
             "authorized_by": api_key
         }
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

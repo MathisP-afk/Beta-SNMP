@@ -1,0 +1,30 @@
+[17-02-2026_17:51:19] - Connexion à la base de données réussie.
+[17-02-2026_17:51:19] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:51:19] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:51:19] - Utilisateur ajouté avec succès à la base (ID: 1)
+[17-02-2026_17:51:19] - Connection de l'utilisateur test_admin.
+[17-02-2026_17:51:19] - Fermeture de la connexion à la base de données - Au revoir!
+[17-02-2026_17:51:19] - Connexion à la base de données réussie.
+[17-02-2026_17:51:19] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:51:19] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:51:19] - Fermeture de la connexion à la base de données - Au revoir!
+[17-02-2026_17:55:20] - Connexion à la base de données réussie.
+[17-02-2026_17:55:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:55:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:55:20] - Utilisateur ajouté avec succès à la base (ID: 1)
+[17-02-2026_17:55:20] - Connection de l'utilisateur test_admin.
+[17-02-2026_17:55:20] - Fermeture de la connexion à la base de données - Au revoir!
+[17-02-2026_17:55:20] - Connexion à la base de données réussie.
+[17-02-2026_17:55:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:55:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_17:55:20] - Fermeture de la connexion à la base de données - Au revoir!
+[17-02-2026_18:24:20] - Connexion à la base de données réussie.
+[17-02-2026_18:24:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_18:24:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_18:24:20] - Utilisateur ajouté avec succès à la base (ID: 1)
+[17-02-2026_18:24:20] - Connection de l'utilisateur test_admin.
+[17-02-2026_18:24:20] - Fermeture de la connexion à la base de données - Au revoir!
+[17-02-2026_18:24:20] - Connexion à la base de données réussie.
+[17-02-2026_18:24:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_18:24:20] - Initialisation de la base de données SQLite - Bonne aventure SNMP!
+[17-02-2026_18:24:20] - Fermeture de la connexion à la base de données - Au revoir!
