@@ -9,6 +9,7 @@ Adaptations:
 ✅ Dashboard avec statistiques réelles
 """
 
+import json
 import flet as ft
 from datetime import datetime
 
@@ -568,11 +569,223 @@ class SNMPMonitorApp:
             ]) 
 
         def create_anomalies_page():
-             # [Le code de la page Anomalies reste identique à votre version précédente]
+            PAGE_SIZE = 100
+            current_offset = [0]  # liste pour mutabilité dans les closures
+
+            anomalies_table_ref = ft.Ref[ft.DataTable]()
+            count_suspect_ref = ft.Ref[ft.Text]()
+            count_elevee_ref = ft.Ref[ft.Text]()
+            count_critique_ref = ft.Ref[ft.Text]()
+            page_label_ref = ft.Ref[ft.Text]()
+            btn_prev_ref = ft.Ref[ft.ElevatedButton]()
+            btn_next_ref = ft.Ref[ft.ElevatedButton]()
+
+            niveau_colors = {
+                'SUSPECT': ft.Colors.AMBER_700,
+                'ELEVEE': ft.Colors.DEEP_ORANGE,
+                'CRITIQUE': ft.Colors.RED_900,
+            }
+
+            def get_counts(niveau_filtre=None):
+                """Récupère les compteurs globaux (indépendant de la page)"""
+                counts = {'SUSPECT': 0, 'ELEVEE': 0, 'CRITIQUE': 0, 'total_filtre': 0}
+                if not self.db:
+                    return counts
+                try:
+                    cursor = self.db.connection.cursor()
+                    for niv in ('SUSPECT', 'ELEVEE', 'CRITIQUE'):
+                        cursor.execute(
+                            "SELECT COUNT(*) FROM paquets_recus "
+                            "WHERE contenu_json LIKE '%alerte_securite%' "
+                            "AND contenu_json LIKE ?",
+                            (f'%"niveau": "{niv}"%',)
+                        )
+                        counts[niv] = cursor.fetchone()[0]
+                    if niveau_filtre and niveau_filtre != "Tous":
+                        counts['total_filtre'] = counts.get(niveau_filtre, 0)
+                    else:
+                        counts['total_filtre'] = counts['SUSPECT'] + counts['ELEVEE'] + counts['CRITIQUE']
+                except Exception as e:
+                    print(f"Erreur compteurs anomalies: {e}")
+                return counts
+
+            def load_page(offset, niveau_filtre=None):
+                """Charge une page de 100 alertes depuis la BDD"""
+                rows = []
+                if not self.db:
+                    return rows
+                try:
+                    cursor = self.db.connection.cursor()
+                    if niveau_filtre and niveau_filtre != "Tous":
+                        cursor.execute(
+                            "SELECT * FROM paquets_recus "
+                            "WHERE contenu_json LIKE '%alerte_securite%' "
+                            "AND contenu_json LIKE ? "
+                            "ORDER BY timestamp_reception DESC LIMIT ? OFFSET ?",
+                            (f'%"niveau": "{niveau_filtre}"%', PAGE_SIZE, offset)
+                        )
+                    else:
+                        cursor.execute(
+                            "SELECT * FROM paquets_recus "
+                            "WHERE contenu_json LIKE '%alerte_securite%' "
+                            "ORDER BY timestamp_reception DESC LIMIT ? OFFSET ?",
+                            (PAGE_SIZE, offset)
+                        )
+                    for row in cursor.fetchall():
+                        p = dict(row)
+                        try:
+                            contenu = json.loads(p.get('contenu_json', '{}'))
+                        except Exception:
+                            contenu = {}
+                        alerte = contenu.get('alerte_securite', {})
+                        niveau = alerte.get('niveau', '?')
+                        badge_color = niveau_colors.get(niveau, ft.Colors.GREY)
+
+                        rows.append(ft.DataRow(cells=[
+                            ft.DataCell(ft.Text(str(p.get('timestamp_reception', ''))[11:19], size=12)),
+                            ft.DataCell(ft.Text(p.get('adresse_source', ''), size=12, weight=ft.FontWeight.BOLD)),
+                            ft.DataCell(ft.Container(
+                                ft.Text(p.get('type_pdu', '?'), color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=ft.Colors.BLUE_700,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                            ft.DataCell(ft.Container(
+                                ft.Text(niveau, color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=badge_color,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                            ft.DataCell(ft.Text(alerte.get('message', ''), size=11)),
+                            ft.DataCell(ft.Text(alerte.get('action_requise', ''), size=11, color=ft.Colors.GREY_700)),
+                        ]))
+                except Exception as e:
+                    print(f"Erreur chargement anomalies: {e}")
+                return rows
+
+            def update_view():
+                filtre = niveau_filter.value
+                counts = get_counts(filtre)
+                rows = load_page(current_offset[0], filtre)
+                total = counts['total_filtre']
+                page_num = (current_offset[0] // PAGE_SIZE) + 1
+                total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+
+                if anomalies_table_ref.current:
+                    anomalies_table_ref.current.rows = rows
+                if count_suspect_ref.current:
+                    count_suspect_ref.current.value = str(counts['SUSPECT'])
+                if count_elevee_ref.current:
+                    count_elevee_ref.current.value = str(counts['ELEVEE'])
+                if count_critique_ref.current:
+                    count_critique_ref.current.value = str(counts['CRITIQUE'])
+                if page_label_ref.current:
+                    page_label_ref.current.value = f"Page {page_num} / {total_pages}  ({total} alertes)"
+                if btn_prev_ref.current:
+                    btn_prev_ref.current.disabled = current_offset[0] == 0
+                if btn_next_ref.current:
+                    btn_next_ref.current.disabled = current_offset[0] + PAGE_SIZE >= total
+                page.update()
+
+            def on_prev(e):
+                current_offset[0] = max(0, current_offset[0] - PAGE_SIZE)
+                update_view()
+
+            def on_next(e):
+                current_offset[0] += PAGE_SIZE
+                update_view()
+
+            def on_filter_change(e):
+                current_offset[0] = 0
+                update_view()
+
+            def on_refresh(e):
+                update_view()
+
+            niveau_filter = ft.Dropdown(
+                hint_text="Filtrer par niveau",
+                options=[
+                    ft.dropdown.Option("Tous"),
+                    ft.dropdown.Option("SUSPECT"),
+                    ft.dropdown.Option("ELEVEE"),
+                    ft.dropdown.Option("CRITIQUE"),
+                ],
+                width=180,
+                on_change=on_filter_change,
+            )
+
+            # Chargement initial
+            initial_counts = get_counts()
+            initial_rows = load_page(0)
+            total_init = initial_counts['total_filtre']
+            total_pages_init = max(1, (total_init + PAGE_SIZE - 1) // PAGE_SIZE)
+
+            summary_cards = ft.Row([
+                ft.Card(content=ft.Container(content=ft.Column([
+                    ft.Row([ft.Icon(ft.Icons.SHIELD, size=30, color=ft.Colors.AMBER_700),
+                            ft.Text(str(initial_counts['SUSPECT']), size=22, weight=ft.FontWeight.BOLD, ref=count_suspect_ref)],
+                           alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text("Suspect", size=13, color=ft.Colors.GREY_600),
+                ]), padding=15, width=170), elevation=2),
+                ft.Card(content=ft.Container(content=ft.Column([
+                    ft.Row([ft.Icon(ft.Icons.SHIELD, size=30, color=ft.Colors.DEEP_ORANGE),
+                            ft.Text(str(initial_counts['ELEVEE']), size=22, weight=ft.FontWeight.BOLD, ref=count_elevee_ref)],
+                           alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text("Élevée", size=13, color=ft.Colors.GREY_600),
+                ]), padding=15, width=170), elevation=2),
+                ft.Card(content=ft.Container(content=ft.Column([
+                    ft.Row([ft.Icon(ft.Icons.SHIELD, size=30, color=ft.Colors.RED_900),
+                            ft.Text(str(initial_counts['CRITIQUE']), size=22, weight=ft.FontWeight.BOLD, ref=count_critique_ref)],
+                           alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                    ft.Text("Critique", size=13, color=ft.Colors.GREY_600),
+                ]), padding=15, width=170), elevation=2),
+            ], spacing=15)
+
+            anomalies_table = ft.DataTable(
+                ref=anomalies_table_ref,
+                columns=[
+                    ft.DataColumn(ft.Text("Heure", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Source", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Type PDU", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Niveau", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Message", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Action", weight=ft.FontWeight.BOLD)),
+                ],
+                rows=initial_rows,
+            )
+
+            pagination_row = ft.Row([
+                ft.ElevatedButton("Précédent", icon=ft.Icons.ARROW_BACK, on_click=on_prev,
+                                  disabled=True, ref=btn_prev_ref),
+                ft.Text(f"Page 1 / {total_pages_init}  ({total_init} alertes)",
+                        size=14, weight=ft.FontWeight.BOLD, ref=page_label_ref),
+                ft.ElevatedButton("Suivant", icon=ft.Icons.ARROW_FORWARD, on_click=on_next,
+                                  disabled=total_init <= PAGE_SIZE, ref=btn_next_ref),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=20)
+
             return ft.Column([
-                ft.Text("Détection d'Anomalies", size=24, weight=ft.FontWeight.BOLD),
-                ft.Text("Module d'analyse statistique", color=ft.Colors.GREY)
-            ])
+                ft.Row([
+                    ft.Text("Détection d'Anomalies", size=24, weight=ft.FontWeight.BOLD),
+                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=on_refresh),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Text("Alertes de sécurité détectées par le collecteur SNMP", size=14, color=ft.Colors.GREY_600),
+                ft.Container(height=15),
+                summary_cards,
+                ft.Container(height=15),
+                ft.Row([niveau_filter], spacing=15),
+                ft.Container(height=15),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            pagination_row,
+                            ft.Container(height=10),
+                            anomalies_table,
+                            ft.Container(height=10),
+                            pagination_row,
+                        ]), padding=15,
+                    ), elevation=2,
+                ),
+            ], expand=True, scroll=ft.ScrollMode.AUTO)
 
         def create_stats_page():
             def refresh_stats(e=None):
