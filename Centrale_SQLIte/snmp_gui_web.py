@@ -10,11 +10,22 @@ Adaptations:
 """
 
 import json
+import sys
+import os
 import flet as ft
 from datetime import datetime
 
 # Import de la classe fournie
 from snmp_database import SNMPDatabase
+
+# Import du module d'envoi SNMP (partage avec Central_Postgre)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+try:
+    from snmp_sender import send_get, send_getnext, send_set, send_trap, SNMPResult, PYSNMP_AVAILABLE
+    SNMP_SENDER_AVAILABLE = True
+except ImportError:
+    SNMP_SENDER_AVAILABLE = False
+    PYSNMP_AVAILABLE = False
 
 
 class SNMPMonitorApp:
@@ -662,12 +673,255 @@ class SNMPMonitorApp:
 
         # --- AUTRES PAGES (Non connectées BDD pour l'instant mais conservées) ---
         def create_send_page():
-            # [Le code de la page Émission reste identique à votre version précédente]
-            # ... (Pour simplifier l'affichage ici, je reprends le contenu standard)
+            if not SNMP_SENDER_AVAILABLE or not PYSNMP_AVAILABLE:
+                return ft.Column([
+                    ft.Text("Emission de Trames SNMP", size=24, weight=ft.FontWeight.BOLD),
+                    ft.Container(height=20),
+                    ft.Card(content=ft.Container(content=ft.Column([
+                        ft.Icon(ft.Icons.WARNING, size=50, color=ft.Colors.ORANGE),
+                        ft.Text("Module pysnmp non disponible", size=18, weight=ft.FontWeight.BOLD),
+                        ft.Text("Installez pysnmp : pip install pysnmp-lextudio", color=ft.Colors.GREY_600),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.CENTER), padding=30), elevation=2),
+                ])
+
+            # --- Champs du formulaire ---
+            ip_field = ft.TextField(label="IP cible", hint_text="ex: 192.168.1.1", width=250, prefix_icon=ft.Icons.COMPUTER)
+            port_field = ft.TextField(label="Port", value="161", width=100)
+
+            version_dropdown = ft.Dropdown(
+                label="Version SNMP", width=150, value="v2c",
+                options=[ft.dropdown.Option("v2c"), ft.dropdown.Option("v3")],
+            )
+            pdu_dropdown = ft.Dropdown(
+                label="Type PDU", width=150, value="GET",
+                options=[ft.dropdown.Option("GET"), ft.dropdown.Option("GETNEXT"),
+                         ft.dropdown.Option("SET"), ft.dropdown.Option("TRAP")],
+            )
+
+            # Auth v2c
+            community_field = ft.TextField(label="Community string", value="public", width=250)
+            v2c_container = ft.Container(content=ft.Row([community_field], spacing=15), visible=True)
+
+            # Auth v3
+            username_field = ft.TextField(label="Username", width=200)
+            auth_pass_field = ft.TextField(label="Auth password", password=True, can_reveal_password=True, width=200)
+            priv_pass_field = ft.TextField(label="Priv password", password=True, can_reveal_password=True, width=200)
+            v3_container = ft.Container(
+                content=ft.Row([username_field, auth_pass_field, priv_pass_field], spacing=15, wrap=True),
+                visible=False,
+            )
+
+            # OID
+            oid_field = ft.TextField(label="OID", hint_text="ex: 1.3.6.1.2.1.1.1.0", width=400, prefix_icon=ft.Icons.ACCOUNT_TREE)
+            oid_container = ft.Container(content=oid_field, visible=True)
+
+            # SET
+            set_value_field = ft.TextField(label="Valeur", width=250)
+            set_type_dropdown = ft.Dropdown(
+                label="Type", width=130, value="String",
+                options=[ft.dropdown.Option("String"), ft.dropdown.Option("Integer")],
+            )
+            set_container = ft.Container(content=ft.Row([set_value_field, set_type_dropdown], spacing=15), visible=False)
+
+            # TRAP
+            trap_oid_field = ft.TextField(label="Trap OID", hint_text="ex: 1.3.6.1.6.3.1.1.5.4", width=350)
+            trap_vb_oid_field = ft.TextField(label="VarBind OID (optionnel)", width=300)
+            trap_vb_value_field = ft.TextField(label="VarBind valeur (optionnel)", width=200)
+            trap_container = ft.Container(
+                content=ft.Column([
+                    trap_oid_field,
+                    ft.Row([trap_vb_oid_field, trap_vb_value_field], spacing=15),
+                ]),
+                visible=False,
+            )
+
+            # Resultat
+            result_badge = ft.Container(visible=False)
+            result_time = ft.Text("", size=13, color=ft.Colors.GREY_600, visible=False)
+            result_varbinds = ft.Column([], spacing=5)
+            result_error = ft.Text("", size=13, color=ft.Colors.RED, visible=False)
+            result_container = ft.Card(
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Text("Resultat", size=16, weight=ft.FontWeight.BOLD),
+                        ft.Divider(),
+                        result_badge, result_time, result_varbinds, result_error,
+                    ]),
+                    padding=15,
+                ),
+                elevation=2, visible=False,
+            )
+
+            # Bouton + spinner
+            send_spinner = ft.ProgressRing(width=20, height=20, stroke_width=3, visible=False)
+            send_button = ft.ElevatedButton(
+                text="Envoyer", icon=ft.Icons.SEND, width=200, height=45,
+                style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.BLUE_700),
+            )
+
+            def on_version_change(e):
+                is_v2c = version_dropdown.value == "v2c"
+                v2c_container.visible = is_v2c
+                v3_container.visible = not is_v2c
+                page.update()
+
+            def on_pdu_change(e):
+                pdu = pdu_dropdown.value
+                oid_container.visible = pdu != "TRAP"
+                set_container.visible = pdu == "SET"
+                trap_container.visible = pdu == "TRAP"
+                if pdu == "TRAP":
+                    port_field.value = "162"
+                else:
+                    if port_field.value == "162":
+                        port_field.value = "161"
+                page.update()
+
+            version_dropdown.on_change = on_version_change
+            pdu_dropdown.on_change = on_pdu_change
+
+            def fill_oid(oid_value):
+                def handler(e):
+                    oid_field.value = oid_value
+                    page.update()
+                return handler
+
+            preset_buttons = ft.Row([
+                ft.OutlinedButton("sysDescr", on_click=fill_oid("1.3.6.1.2.1.1.1.0")),
+                ft.OutlinedButton("sysUpTime", on_click=fill_oid("1.3.6.1.2.1.1.3.0")),
+                ft.OutlinedButton("sysName", on_click=fill_oid("1.3.6.1.2.1.1.5.0")),
+                ft.OutlinedButton("sysLocation", on_click=fill_oid("1.3.6.1.2.1.1.6.0")),
+                ft.OutlinedButton("ifDescr", on_click=fill_oid("1.3.6.1.2.1.2.2.1.2")),
+            ], wrap=True, spacing=8)
+
+            async def do_send(e):
+                # Validation
+                if not ip_field.value or not ip_field.value.strip():
+                    self.show_snackbar(page, "Veuillez renseigner l'IP cible", ft.Colors.RED)
+                    return
+
+                pdu = pdu_dropdown.value
+                if pdu != "TRAP" and (not oid_field.value or not oid_field.value.strip()):
+                    self.show_snackbar(page, "Veuillez renseigner l'OID", ft.Colors.RED)
+                    return
+                if pdu == "TRAP" and (not trap_oid_field.value or not trap_oid_field.value.strip()):
+                    self.show_snackbar(page, "Veuillez renseigner le Trap OID", ft.Colors.RED)
+                    return
+                if pdu == "SET" and not set_value_field.value:
+                    self.show_snackbar(page, "Veuillez renseigner la valeur SET", ft.Colors.RED)
+                    return
+
+                # UI : envoi en cours
+                send_button.disabled = True
+                send_spinner.visible = True
+                result_container.visible = False
+                page.update()
+
+                try:
+                    host = ip_field.value.strip()
+                    port = int(port_field.value or "161")
+                    ver = version_dropdown.value
+                    comm = community_field.value or "public"
+                    user = username_field.value or ""
+                    auth_p = auth_pass_field.value or ""
+                    priv_p = priv_pass_field.value or ""
+
+                    result: SNMPResult
+                    if pdu == "GET":
+                        result = await send_get(host, port, oid_field.value.strip(), ver, comm, user, auth_p, priv_p)
+                    elif pdu == "GETNEXT":
+                        result = await send_getnext(host, port, oid_field.value.strip(), ver, comm, user, auth_p, priv_p)
+                    elif pdu == "SET":
+                        vtype = "integer" if set_type_dropdown.value == "Integer" else "string"
+                        result = await send_set(host, port, oid_field.value.strip(), set_value_field.value, vtype, ver, comm, user, auth_p, priv_p)
+                    else:  # TRAP
+                        result = await send_trap(
+                            host, port, trap_oid_field.value.strip(),
+                            trap_vb_oid_field.value or "", trap_vb_value_field.value or "",
+                            ver, comm, user, auth_p, priv_p,
+                        )
+
+                    # Afficher le resultat
+                    if result.success:
+                        result_badge.content = ft.Container(
+                            ft.Text("SUCCES", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD),
+                            bgcolor=ft.Colors.GREEN, padding=ft.padding.symmetric(horizontal=15, vertical=6), border_radius=5,
+                        )
+                    else:
+                        result_badge.content = ft.Container(
+                            ft.Text("ECHEC", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD),
+                            bgcolor=ft.Colors.RED, padding=ft.padding.symmetric(horizontal=15, vertical=6), border_radius=5,
+                        )
+                    result_badge.visible = True
+
+                    result_time.value = f"Temps : {result.elapsed_ms:.1f} ms"
+                    result_time.visible = True
+
+                    result_varbinds.controls.clear()
+                    for oid_str, val_str in result.varbinds:
+                        result_varbinds.controls.append(
+                            ft.Row([
+                                ft.Text(oid_str, size=12, weight=ft.FontWeight.BOLD, color=ft.Colors.BLUE_700),
+                                ft.Text("=", size=12),
+                                ft.Text(val_str, size=12, selectable=True),
+                            ], spacing=8)
+                        )
+
+                    if result.error_message:
+                        result_error.value = f"Erreur : {result.error_message}"
+                        result_error.visible = True
+                    else:
+                        result_error.visible = False
+
+                    result_container.visible = True
+
+                except Exception as exc:
+                    result_badge.content = ft.Container(
+                        ft.Text("ERREUR", color=ft.Colors.WHITE, size=14, weight=ft.FontWeight.BOLD),
+                        bgcolor=ft.Colors.RED, padding=ft.padding.symmetric(horizontal=15, vertical=6), border_radius=5,
+                    )
+                    result_badge.visible = True
+                    result_error.value = f"Exception : {exc}"
+                    result_error.visible = True
+                    result_time.visible = False
+                    result_varbinds.controls.clear()
+                    result_container.visible = True
+                finally:
+                    send_button.disabled = False
+                    send_spinner.visible = False
+                    page.update()
+
+            send_button.on_click = do_send
+
             return ft.Column([
-                ft.Text("Émission de Trames (Simulation)", size=24, weight=ft.FontWeight.BOLD),
-                ft.Text("Cette fonctionnalité nécessiterait un module d'envoi SNMP (ex: pysnmp)", color=ft.Colors.GREY)
-            ]) 
+                ft.Text("Emission de Trames SNMP", size=24, weight=ft.FontWeight.BOLD),
+                ft.Text("Envoi direct de requetes SNMP v2c / v3", size=14, color=ft.Colors.GREY_600),
+                ft.Container(height=15),
+                ft.Card(content=ft.Container(content=ft.Column([
+                    ft.Text("Cible et protocole", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    ft.Row([ip_field, port_field, version_dropdown, pdu_dropdown], spacing=15, wrap=True),
+                    ft.Container(height=10),
+                    ft.Text("Authentification", size=14, weight=ft.FontWeight.BOLD, color=ft.Colors.GREY_700),
+                    v2c_container,
+                    v3_container,
+                ]), padding=15), elevation=2),
+                ft.Container(height=10),
+                ft.Card(content=ft.Container(content=ft.Column([
+                    ft.Text("Parametres de la requete", size=16, weight=ft.FontWeight.BOLD),
+                    ft.Divider(),
+                    oid_container,
+                    set_container,
+                    trap_container,
+                    ft.Container(height=8),
+                    ft.Text("OIDs rapides", size=13, color=ft.Colors.GREY_700),
+                    preset_buttons,
+                ]), padding=15), elevation=2),
+                ft.Container(height=15),
+                ft.Row([send_button, send_spinner], spacing=15, alignment=ft.MainAxisAlignment.CENTER),
+                ft.Container(height=15),
+                result_container,
+            ], expand=True, scroll=ft.ScrollMode.AUTO)
 
         def create_anomalies_page():
             PAGE_SIZE = 100
