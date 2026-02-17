@@ -99,7 +99,7 @@ class SNMPMonitorApp:
 
     def get_stats_data(self):
         """Récupère les données agrégées pour les graphiques statistiques"""
-        empty = {"pdu_types": [], "versions": [], "top_ips": [], "temporal": []}
+        empty = {"pdu_types": [], "versions": [], "top_ips": [], "temporal": [], "top_oids": []}
         if not self.db:
             return empty
         try:
@@ -124,9 +124,15 @@ class SNMPMonitorApp:
                 "ORDER BY DATE(timestamp_reception) DESC LIMIT 30"
             )
             temporal = list(reversed(cursor.fetchall()))
+            cursor.execute(
+                "SELECT oid_racine, COUNT(*) FROM paquets_recus "
+                "WHERE oid_racine IS NOT NULL AND oid_racine != '' "
+                "GROUP BY oid_racine ORDER BY COUNT(*) DESC LIMIT 10"
+            )
+            top_oids = cursor.fetchall()
             return {
                 "pdu_types": pdu_types, "versions": versions,
-                "top_ips": top_ips, "temporal": temporal
+                "top_ips": top_ips, "temporal": temporal, "top_oids": top_oids
             }
         except Exception as e:
             print(f"Erreur stats graphiques: {e}")
@@ -699,6 +705,51 @@ class SNMPMonitorApp:
                     alignment=ft.alignment.center, expand=True,
                 )
 
+            # --- BarChart : Top 10 OIDs ---
+            oid_groups = []
+            oid_labels = []
+            max_oid = max((r[1] for r in data["top_oids"]), default=0)
+            oid_palette = [
+                ft.Colors.DEEP_PURPLE_700, ft.Colors.DEEP_PURPLE_500, ft.Colors.DEEP_PURPLE_400,
+                ft.Colors.PURPLE_400, ft.Colors.PURPLE_300, ft.Colors.INDIGO_600,
+                ft.Colors.INDIGO_400, ft.Colors.BLUE_ACCENT_400, ft.Colors.BLUE_ACCENT_200,
+                ft.Colors.DEEP_PURPLE_200,
+            ]
+            for i, r in enumerate(data["top_oids"]):
+                oid_groups.append(ft.BarChartGroup(
+                    x=i,
+                    bar_rods=[ft.BarChartRod(
+                        from_y=0, to_y=r[1], width=22,
+                        color=oid_palette[i % len(oid_palette)],
+                        tooltip=f"{r[0]}: {r[1]}",
+                        border_radius=4,
+                    )],
+                ))
+                oid_label = str(r[0])
+                if len(oid_label) > 18:
+                    oid_label = ".." + oid_label[-16:]
+                oid_labels.append(ft.ChartAxisLabel(
+                    value=i,
+                    label=ft.Container(
+                        ft.Text(oid_label, size=7),
+                        padding=ft.padding.only(top=5),
+                    ),
+                ))
+            if oid_groups:
+                oid_chart = ft.BarChart(
+                    bar_groups=oid_groups,
+                    bottom_axis=ft.ChartAxis(labels=oid_labels, labels_size=40),
+                    left_axis=ft.ChartAxis(labels_size=50),
+                    tooltip_bgcolor=ft.Colors.GREY_800,
+                    max_y=(max_oid * 1.15) if max_oid > 0 else 10,
+                    expand=True,
+                )
+            else:
+                oid_chart = ft.Container(
+                    ft.Text("Aucune donnée", italic=True, color=ft.Colors.GREY),
+                    alignment=ft.alignment.center, expand=True,
+                )
+
             def chart_card(title, icon, chart, height=280):
                 return ft.Card(
                     content=ft.Container(
@@ -728,6 +779,8 @@ class SNMPMonitorApp:
                 chart_card("Top 10 Sources IP", ft.Icons.BAR_CHART, bar_chart),
                 ft.Container(height=15),
                 chart_card("Trafic (30 derniers jours)", ft.Icons.SHOW_CHART, line_chart),
+                ft.Container(height=15),
+                chart_card("Top 10 OIDs les plus requêtés", ft.Icons.ACCOUNT_TREE, oid_chart),
             ], expand=True, scroll=ft.ScrollMode.AUTO)
 
         # Gestion Navigation
