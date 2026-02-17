@@ -440,85 +440,155 @@ class SNMPMonitorApp:
 
         # --- PAGE TRAFFIC CONNECTÉE BDD ---
         def create_traffic_page():
+            PAGE_SIZE = 100
+            current_offset = [0]
+
             traffic_table_ref = ft.Ref[ft.DataTable]()
+            page_label_ref = ft.Ref[ft.Text]()
+            btn_prev_ref = ft.Ref[ft.ElevatedButton]()
+            btn_next_ref = ft.Ref[ft.ElevatedButton]()
 
-            def load_traffic_data(ip_source=None, pdu_type=None):
-                """Charge les données depuis la BDD avec filtres"""
+            niveau_colors = {
+                'SUSPECT': ft.Colors.AMBER_700,
+                'ELEVEE': ft.Colors.DEEP_ORANGE,
+                'CRITIQUE': ft.Colors.RED_900,
+            }
+
+            def build_where(ip_source=None, pdu_type=None, version=None, oid=None):
+                clauses = ["TRUE"]
+                params = []
+                if ip_source and ip_source.strip():
+                    clauses.append("adresse_source = %s")
+                    params.append(ip_source.strip())
+                if pdu_type and pdu_type != "Tous":
+                    clauses.append("UPPER(type_pdu) LIKE %s")
+                    params.append(f"%{pdu_type.upper()}%")
+                if version and version != "Toutes":
+                    clauses.append("version_snmp = %s")
+                    params.append(version)
+                if oid and oid.strip():
+                    clauses.append("oid_racine LIKE %s")
+                    params.append(f"%{oid.strip()}%")
+                return " AND ".join(clauses), params
+
+            def get_total(ip_source=None, pdu_type=None, version=None, oid=None):
+                if not self.db:
+                    return 0
+                try:
+                    cursor = self.db.connection.cursor()
+                    where, params = build_where(ip_source, pdu_type, version, oid)
+                    cursor.execute(f"SELECT COUNT(*) FROM paquets_recus WHERE {where}", params)
+                    return cursor.fetchone()[0]
+                except Exception as e:
+                    print(f"Erreur count traffic: {e}")
+                    return 0
+
+            def load_page(offset, ip_source=None, pdu_type=None, version=None, oid=None):
                 rows = []
-                if self.db:
-                    # 1. Récupération via BDD (Filtre IP supporté nativement)
-                    if ip_source and ip_source.strip():
-                        paquets = self.db.rechercher_paquets(adresse_source=ip_source)
-                    else:
-                        paquets = self.db.lister_paquets_snmp(limite=50)
-
-                    # 2. Filtrage Python pour le Type (non supporté par rechercher_paquets)
-                    for p in paquets:
+                if not self.db:
+                    return rows
+                try:
+                    from psycopg2.extras import RealDictCursor
+                    cursor = self.db.connection.cursor(cursor_factory=RealDictCursor)
+                    where, params = build_where(ip_source, pdu_type, version, oid)
+                    cursor.execute(
+                        f"SELECT * FROM paquets_recus WHERE {where} "
+                        f"ORDER BY timestamp_reception DESC LIMIT %s OFFSET %s",
+                        params + [PAGE_SIZE, offset]
+                    )
+                    for row in cursor.fetchall():
+                        p = dict(row)
                         t_pdu = str(p.get('type_pdu', 'Unknown'))
 
-                        # Application du filtre Type si sélectionné
-                        if pdu_type and pdu_type != "Tous":
-                            if pdu_type.upper() not in t_pdu.upper():
-                                continue # On saute ce paquet
-
-                        # Détermination status/couleur
+                        # Détermination status/couleur avec détection d'anomalie
                         status = "OK"
                         status_color = ft.Colors.GREEN
-                        if str(p.get('error_status', '0')) != '0':
+
+                        try:
+                            contenu = json.loads(p.get('contenu_json', '{}'))
+                        except Exception:
+                            contenu = {}
+                        alerte = contenu.get('alerte_securite')
+
+                        if alerte:
+                            niveau = alerte.get('niveau', '?')
+                            status = niveau
+                            status_color = niveau_colors.get(niveau, ft.Colors.GREY)
+                        elif str(p.get('error_status', '0')) != '0':
                             status = f"Err {p.get('error_status')}"
                             status_color = ft.Colors.RED
                         elif 'Trap' in t_pdu:
                             status = "Trap"
                             status_color = ft.Colors.BLUE
 
-                        rows.append(
-                            ft.DataRow(cells=[
-                                ft.DataCell(ft.Text(str(p['timestamp_reception'])[11:19], size=12)),
-                                ft.DataCell(ft.Text(p['adresse_source'], size=12, weight=ft.FontWeight.BOLD)),
-                                ft.DataCell(
-                                    ft.Container(
-                                        ft.Text(str(p.get('version_snmp', 'N/A')), color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
-                                        bgcolor=ft.Colors.TEAL if str(p.get('version_snmp', '')).lower() == 'v3' else ft.Colors.BLUE_GREY,
-                                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                                        border_radius=4
-                                    )
-                                ),
-                                ft.DataCell(
-                                    ft.Container(
-                                        ft.Text(t_pdu[:15], color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
-                                        bgcolor=ft.Colors.BLUE_700,
-                                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                                        border_radius=4
-                                    )
-                                ),
-                                ft.DataCell(ft.Text(str(p.get('oid_racine', 'N/A'))[:25]+"...", size=11, color=ft.Colors.GREY_700)),
-                                ft.DataCell(
-                                    ft.Container(
-                                        ft.Text(status, color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
-                                        bgcolor=status_color,
-                                        padding=ft.padding.symmetric(horizontal=8, vertical=4),
-                                        border_radius=4
-                                    )
-                                ),
-                            ])
-                        )
+                        rows.append(ft.DataRow(cells=[
+                            ft.DataCell(ft.Text(str(p.get('timestamp_reception', ''))[11:19], size=12)),
+                            ft.DataCell(ft.Text(p.get('adresse_source', ''), size=12, weight=ft.FontWeight.BOLD)),
+                            ft.DataCell(ft.Container(
+                                ft.Text(str(p.get('version_snmp', 'N/A')), color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=ft.Colors.TEAL if str(p.get('version_snmp', '')).lower() == 'v3' else ft.Colors.BLUE_GREY,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                            ft.DataCell(ft.Container(
+                                ft.Text(t_pdu[:15], color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=ft.Colors.BLUE_700,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                            ft.DataCell(ft.Text(str(p.get('oid_racine', 'N/A'))[:25] + "...", size=11, color=ft.Colors.GREY_700)),
+                            ft.DataCell(ft.Container(
+                                ft.Text(status, color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=status_color,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                        ]))
+                except Exception as e:
+                    print(f"Erreur chargement traffic: {e}")
+                return rows
+
+            def update_view():
+                ip = ip_filter.value
+                typ = type_filter.value
+                ver = version_filter.value
+                oid_val = oid_filter.value
+                total = get_total(ip, typ, ver, oid_val)
+                rows = load_page(current_offset[0], ip, typ, ver, oid_val)
+                page_num = (current_offset[0] // PAGE_SIZE) + 1
+                total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
 
                 if traffic_table_ref.current:
                     traffic_table_ref.current.rows = rows
-                    page.update()
+                if page_label_ref.current:
+                    page_label_ref.current.value = f"Page {page_num} / {total_pages}  ({total} paquets)"
+                if btn_prev_ref.current:
+                    btn_prev_ref.current.disabled = current_offset[0] == 0
+                if btn_next_ref.current:
+                    btn_next_ref.current.disabled = current_offset[0] + PAGE_SIZE >= total
+                page.update()
 
-            def filter_traffic(e=None):
-                ip = ip_filter.value
-                typ = type_filter.value
-                load_traffic_data(ip, typ)
-                self.show_snackbar(page, "Filtres appliqués (Recherche BDD)", ft.Colors.BLUE)
+            def on_prev(e):
+                current_offset[0] = max(0, current_offset[0] - PAGE_SIZE)
+                update_view()
+
+            def on_next(e):
+                current_offset[0] += PAGE_SIZE
+                update_view()
+
+            def on_filter(e=None):
+                current_offset[0] = 0
+                update_view()
+
+            def on_refresh(e):
+                update_view()
 
             # Filtres UI
             ip_filter = ft.TextField(
                 hint_text="Filtrer par IP source...",
                 prefix_icon=ft.Icons.SEARCH,
                 width=200,
-                on_submit=filter_traffic
+                on_submit=on_filter,
             )
 
             type_filter = ft.Dropdown(
@@ -527,13 +597,37 @@ class SNMPMonitorApp:
                     ft.dropdown.Option("Tous"),
                     ft.dropdown.Option("GET"),
                     ft.dropdown.Option("SET"),
-                    ft.dropdown.Option("TRAP")
+                    ft.dropdown.Option("TRAP"),
+                    ft.dropdown.Option("RESPONSE"),
+                    ft.dropdown.Option("REPORT"),
                 ],
                 width=150,
-                on_change=filter_traffic
+                on_change=on_filter,
             )
 
-            # Table
+            version_filter = ft.Dropdown(
+                hint_text="Version SNMP",
+                options=[
+                    ft.dropdown.Option("Toutes"),
+                    ft.dropdown.Option("v2c"),
+                    ft.dropdown.Option("v3"),
+                ],
+                width=140,
+                on_change=on_filter,
+            )
+
+            oid_filter = ft.TextField(
+                hint_text="Filtrer par OID...",
+                prefix_icon=ft.Icons.ACCOUNT_TREE,
+                width=220,
+                on_submit=on_filter,
+            )
+
+            # Chargement initial
+            initial_total = get_total()
+            initial_rows = load_page(0)
+            total_pages_init = max(1, (initial_total + PAGE_SIZE - 1) // PAGE_SIZE)
+
             traffic_table = ft.DataTable(
                 ref=traffic_table_ref,
                 columns=[
@@ -544,31 +638,37 @@ class SNMPMonitorApp:
                     ft.DataColumn(ft.Text("OID", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Statut", weight=ft.FontWeight.BOLD)),
                 ],
-                rows=[]
+                rows=initial_rows,
             )
 
-            # Chargement initial
-            # On utilise un petit délai pour laisser le temps au composant de se monter
-            # (ou on appelle juste après le return mais dans Flet c'est synchrone ici)
-            load_traffic_data()
+            pagination_row = ft.Row([
+                ft.ElevatedButton("Précédent", icon=ft.Icons.ARROW_BACK, on_click=on_prev,
+                                  disabled=True, ref=btn_prev_ref),
+                ft.Text(f"Page 1 / {total_pages_init}  ({initial_total} paquets)",
+                        size=14, weight=ft.FontWeight.BOLD, ref=page_label_ref),
+                ft.ElevatedButton("Suivant", icon=ft.Icons.ARROW_FORWARD, on_click=on_next,
+                                  disabled=initial_total <= PAGE_SIZE, ref=btn_next_ref),
+            ], alignment=ft.MainAxisAlignment.CENTER, spacing=20)
 
             return ft.Column([
                 ft.Row([
                     ft.Text("Traffic SNMP (BDD)", size=24, weight=ft.FontWeight.BOLD),
-                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=lambda e: load_traffic_data(ip_filter.value, type_filter.value))
+                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=on_refresh),
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Container(height=15),
-                ft.Row([ip_filter, type_filter, ft.ElevatedButton("Filtrer", on_click=filter_traffic)], spacing=15),
-                ft.Container(height=25),
+                ft.Row([ip_filter, type_filter, version_filter, oid_filter, ft.ElevatedButton("Filtrer", on_click=on_filter)], spacing=15, wrap=True),
+                ft.Container(height=15),
                 ft.Card(
                     content=ft.Container(
                         content=ft.Column([
-                            ft.Text("Paquets enregistrés", size=14, color=ft.Colors.GREY_600),
+                            pagination_row,
                             ft.Container(height=10),
-                            traffic_table
-                        ]), padding=15
-                    ), elevation=2
-                )
+                            traffic_table,
+                            ft.Container(height=10),
+                            pagination_row,
+                        ]), padding=15,
+                    ), elevation=2,
+                ),
             ], expand=True, scroll=ft.ScrollMode.AUTO)
 
         # --- AUTRES PAGES (Non connectées BDD pour l'instant mais conservées) ---
