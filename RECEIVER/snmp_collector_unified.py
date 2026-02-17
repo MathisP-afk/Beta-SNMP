@@ -860,7 +860,7 @@ class UnifiedSNMPCollector:
                 # Analyse de sévérité
                 severite = self.analyser_severite(packet_info)
 
-                if severite in ['ELEVEE', 'CRITIQUE']:
+                if severite in ['SUSPECT', 'ELEVEE', 'CRITIQUE']:
                     packet_info['contenu']['alerte_securite'] = {
                         'niveau': severite,
                         'message': f"{packet_info['type_pdu']} suspect "
