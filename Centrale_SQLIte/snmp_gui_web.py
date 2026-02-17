@@ -49,7 +49,7 @@ class SNMPMonitorApp:
             return {
                 "total_requests": 0, "get_requests": 0, "set_requests": 0,
                 "response_requests": 0, "report_requests": 0,
-                "errors": 0, "last_update": datetime.now().strftime("%H:%M:%S")
+                "errors": 0, "anomalies": 0, "last_update": datetime.now().strftime("%H:%M:%S")
             }
         
         try:
@@ -79,6 +79,10 @@ class SNMPMonitorApp:
             cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE error_status != '0' AND error_status IS NOT NULL")
             errors = cursor.fetchone()[0]
 
+            # Alertes sécurité (anomalies détectées par le collecteur)
+            cursor.execute("SELECT COUNT(*) FROM paquets_recus WHERE contenu_json LIKE '%alerte_securite%'")
+            anomalies = cursor.fetchone()[0]
+
             return {
                 "total_requests": total,
                 "get_requests": get_req,
@@ -86,11 +90,12 @@ class SNMPMonitorApp:
                 "response_requests": response_req,
                 "report_requests": report_req,
                 "errors": errors,
+                "anomalies": anomalies,
                 "last_update": datetime.now().strftime("%H:%M:%S")
             }
         except Exception as e:
             print(f"Erreur stats dashboard: {e}")
-            return {"total_requests": 0, "get_requests": 0, "set_requests": 0, "response_requests": 0, "report_requests": 0, "errors": 0, "last_update": "Erreur"}
+            return {"total_requests": 0, "get_requests": 0, "set_requests": 0, "response_requests": 0, "report_requests": 0, "errors": 0, "anomalies": 0, "last_update": "Erreur"}
 
     def get_recent_activity(self, limit=5):
         """Récupère les derniers paquets pour l'activité récente"""
@@ -307,10 +312,24 @@ class SNMPMonitorApp:
                     icon = ft.Icons.CONNECT_WITHOUT_CONTACT
                     color = ft.Colors.PURPLE
 
+                # Détection d'alerte sécurité
+                alerte = pkt.get('contenu', {}).get('alerte_securite')
+                titre_pdu = pkt.get('type_pdu', 'Unknown')
+                if alerte:
+                    niveau = alerte.get('niveau', '')
+                    icon = ft.Icons.SHIELD
+                    if niveau == 'CRITIQUE':
+                        color = ft.Colors.RED_900
+                    elif niveau == 'ELEVEE':
+                        color = ft.Colors.DEEP_ORANGE
+                    else:
+                        color = ft.Colors.AMBER_700
+                    titre_pdu = f"{niveau} - {titre_pdu}"
+
                 recent_rows.append(
                     ft.ListTile(
                         leading=ft.CircleAvatar(content=ft.Icon(icon, color=ft.Colors.WHITE), bgcolor=color),
-                        title=ft.Text(f"{pkt.get('type_pdu', 'Unknown')}"),
+                        title=ft.Text(titre_pdu),
                         subtitle=ft.Text(f"{pkt.get('adresse_source')} → {pkt.get('oid_racine', 'N/A')}"),
                         trailing=ft.Text(str(pkt.get('timestamp_reception'))[11:19], color=ft.Colors.GREY_500)
                     )
@@ -374,10 +393,20 @@ class SNMPMonitorApp:
                 ft.Card(
                     content=ft.Container(
                         content=ft.Column([
-                            ft.Row([ft.Icon(ft.Icons.ERROR, size=35, color=ft.Colors.RED),
+                            ft.Row([ft.Icon(ft.Icons.ERROR_OUTLINE, size=35, color=ft.Colors.AMBER_700),
                                    ft.Text(str(self.stats["errors"]), size=26, weight=ft.FontWeight.BOLD)],
                                    alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                             ft.Text("Erreurs SNMP", size=14, color=ft.Colors.GREY_600),
+                        ]), padding=20, width=220
+                    ), elevation=2
+                ),
+                ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([ft.Icon(ft.Icons.SHIELD, size=35, color=ft.Colors.RED),
+                                   ft.Text(str(self.stats["anomalies"]), size=26, weight=ft.FontWeight.BOLD)],
+                                   alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                            ft.Text("Alertes Sécurité", size=14, color=ft.Colors.GREY_600),
                         ]), padding=20, width=220
                     ), elevation=2
                 ),
