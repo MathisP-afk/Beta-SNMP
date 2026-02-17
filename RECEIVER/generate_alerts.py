@@ -104,6 +104,56 @@ ALERT_SCENARIOS = [
 
 V3_USERS = ["Alleria_W", "admin_snmp", "monitor_v3", "intrus_inconnu"]
 
+# Scénario spam : même IP, communautés variées (simule brute-force communauté)
+SPAM_IP = "10.0.0.66"
+SPAM_COMMUNITIES = [
+    "public", "private", "secret", "admin", "test",
+    "community1", "snmp_rw", "monitor", "backup", "cisco",
+]
+
+
+def generate_spam_v2c_alert():
+    """Génère un paquet de spam/brute-force communauté depuis une même IP."""
+    now = datetime.datetime.now().isoformat()
+    community = random.choice(SPAM_COMMUNITIES)
+    oid = random.choice([
+        "1.3.6.1.2.1.1.1.0", "1.3.6.1.2.1.1.3.0",
+        "1.3.6.1.2.1.1.5.0", "1.3.6.1.2.1.2.1.0",
+    ])
+    return {
+        "source_ip": SPAM_IP,
+        "source_port": random.randint(1024, 65535),
+        "dest_ip": "10.204.0.119",
+        "dest_port": 161,
+        "community": community,
+        "oid_racine": oid,
+        "type_pdu": "GetRequest",
+        "request_id": random.randint(1, 999999),
+        "error_status": "0",
+        "error_index": 0,
+        "contenu": {
+            "varbinds": [
+                {
+                    "oid": oid,
+                    "oid_name": "sysDescr",
+                    "oid_desc": "Description du système",
+                    "value": "NULL",
+                    "type": "test_spam",
+                }
+            ],
+            "dico_valeurs": {oid: "NULL"},
+            "capture_mode": "test",
+            "alerte_securite": {
+                "niveau": "ELEVEE",
+                "message": f"Spam/brute-force communauté depuis {SPAM_IP} "
+                           f"(community={community})",
+                "timestamp": now,
+                "details": "PDU: GetRequest — scan de communautés",
+                "action_requise": f"Vérifier {SPAM_IP}",
+            },
+        },
+    }
+
 
 def generate_v2c_alert():
     scenario = random.choice(ALERT_SCENARIOS)
@@ -210,6 +260,8 @@ def main():
                         help="Générer uniquement des alertes v2c")
     parser.add_argument("--v3-only", action="store_true",
                         help="Générer uniquement des alertes v3")
+    parser.add_argument("--spam", action="store_true",
+                        help="Inclure des alertes de spam/brute-force communauté")
     args = parser.parse_args()
 
     session = requests.Session()
@@ -229,17 +281,21 @@ def main():
     fail = 0
 
     for i in range(1, args.count + 1):
-        if args.v2c_only:
+        if args.spam and random.random() < 0.3:
             version = "v2c"
+            alert = generate_spam_v2c_alert()
+        elif args.v2c_only:
+            version = "v2c"
+            alert = generate_v2c_alert()
         elif args.v3_only:
             version = "v3"
+            alert = generate_v3_alert()
         else:
             version = random.choice(["v2c", "v3"])
-
-        if version == "v2c":
-            alert = generate_v2c_alert()
-        else:
-            alert = generate_v3_alert()
+            if version == "v2c":
+                alert = generate_v2c_alert()
+            else:
+                alert = generate_v3_alert()
 
         niveau = alert["contenu"]["alerte_securite"]["niveau"]
         msg = alert["contenu"]["alerte_securite"]["message"]
