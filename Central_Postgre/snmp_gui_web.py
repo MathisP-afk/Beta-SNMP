@@ -100,6 +100,41 @@ class SNMPMonitorApp:
         if not self.db: return []
         return self.db.lister_paquets_snmp(limite=limit)
 
+    def get_stats_data(self):
+        """Récupère les données agrégées pour les graphiques statistiques"""
+        empty = {"pdu_types": [], "versions": [], "top_ips": [], "temporal": []}
+        if not self.db:
+            return empty
+        try:
+            cursor = self.db.connection.cursor()
+            cursor.execute(
+                "SELECT type_pdu, COUNT(*) FROM paquets_recus GROUP BY type_pdu ORDER BY COUNT(*) DESC"
+            )
+            pdu_types = cursor.fetchall()
+            cursor.execute(
+                "SELECT version_snmp, COUNT(*) FROM paquets_recus GROUP BY version_snmp ORDER BY COUNT(*) DESC"
+            )
+            versions = cursor.fetchall()
+            cursor.execute(
+                "SELECT adresse_source, COUNT(*) FROM paquets_recus "
+                "GROUP BY adresse_source ORDER BY COUNT(*) DESC LIMIT 10"
+            )
+            top_ips = cursor.fetchall()
+            cursor.execute(
+                "SELECT DATE(timestamp_reception), COUNT(*) FROM paquets_recus "
+                "WHERE timestamp_reception IS NOT NULL "
+                "GROUP BY DATE(timestamp_reception) "
+                "ORDER BY DATE(timestamp_reception) DESC LIMIT 30"
+            )
+            temporal = list(reversed(cursor.fetchall()))
+            return {
+                "pdu_types": pdu_types, "versions": versions,
+                "top_ips": top_ips, "temporal": temporal
+            }
+        except Exception as e:
+            print(f"Erreur stats graphiques: {e}")
+            return empty
+
     def main(self, page: ft.Page):
         page.title = "SNMP Monitor - SAE 501-502"
         page.theme_mode = ft.ThemeMode.LIGHT
@@ -138,6 +173,11 @@ class SNMPMonitorApp:
                         icon=ft.Icons.WARNING_OUTLINED,
                         selected_icon=ft.Icons.WARNING,
                         label="Anomalies"
+                    ),
+                    ft.NavigationRailDestination(
+                        icon=ft.Icons.ANALYTICS_OUTLINED,
+                        selected_icon=ft.Icons.ANALYTICS,
+                        label="Statistiques"
                     ),
                 ],
                 on_change=self.on_navigation_change,
@@ -366,57 +406,26 @@ class SNMPMonitorApp:
         def create_traffic_page():
             traffic_table_ref = ft.Ref[ft.DataTable]()
 
-            PAGE_SIZE = 100
-            pagination_state = {"current_page": 0}
-            page_info_text = ft.Text("Page 1 / 1", size=13)
-            btn_prev = ft.IconButton(icon=ft.Icons.ARROW_BACK, tooltip="Page précédente", disabled=True)
-            btn_next = ft.IconButton(icon=ft.Icons.ARROW_FORWARD, tooltip="Page suivante", disabled=True)
-
-            def load_traffic_data(ip_source=None, pdu_type=None, version=None, page_num=0):
-                """Charge les données depuis la BDD avec filtres et pagination côté SQL"""
+            def load_traffic_data(ip_source=None, pdu_type=None):
+                """Charge les données depuis la BDD avec filtres"""
                 rows = []
-                total = 0
-                total_pages = 1
                 if self.db:
-                    cursor = self.db.connection.cursor()
-
-                    # Construction dynamique de la clause WHERE
-                    conditions = []
-                    params = []
+                    # 1. Récupération via BDD (Filtre IP supporté nativement)
                     if ip_source and ip_source.strip():
-                        conditions.append("adresse_source = %s")
-                        params.append(ip_source.strip())
-                    if pdu_type and pdu_type != "Tous":
-                        conditions.append("UPPER(type_pdu) LIKE %s")
-                        params.append(f"%{pdu_type.upper()}%")
-                    if version and version != "Toutes":
-                        conditions.append("LOWER(version_snmp) = %s")
-                        params.append(version.lower())
+                        paquets = self.db.rechercher_paquets(adresse_source=ip_source)
+                    else:
+                        paquets = self.db.lister_paquets_snmp(limite=50)
 
-                    where = ""
-                    if conditions:
-                        where = "WHERE " + " AND ".join(conditions)
-
-                    # 1. Comptage total (pour la pagination)
-                    cursor.execute(f"SELECT COUNT(*) FROM paquets_recus {where}", params)
-                    total = cursor.fetchone()[0]
-
-                    # 2. Pagination
-                    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-                    page_num = max(0, min(page_num, total_pages - 1))
-                    pagination_state["current_page"] = page_num
-                    offset = page_num * PAGE_SIZE
-
-                    # 3. Récupération de la page courante uniquement
-                    cursor.execute(
-                        f"SELECT * FROM paquets_recus {where} ORDER BY timestamp_reception DESC LIMIT %s OFFSET %s",
-                        params + [PAGE_SIZE, offset]
-                    )
-                    columns = [desc[0] for desc in cursor.description]
-
-                    for row_tuple in cursor.fetchall():
-                        p = dict(zip(columns, row_tuple))
+                    # 2. Filtrage Python pour le Type (non supporté par rechercher_paquets)
+                    for p in paquets:
                         t_pdu = str(p.get('type_pdu', 'Unknown'))
+
+                        # Application du filtre Type si sélectionné
+                        if pdu_type and pdu_type != "Tous":
+                            if pdu_type.upper() not in t_pdu.upper():
+                                continue # On saute ce paquet
+
+                        # Détermination status/couleur
                         status = "OK"
                         status_color = ft.Colors.GREEN
                         if str(p.get('error_status', '0')) != '0':
@@ -460,27 +469,13 @@ class SNMPMonitorApp:
 
                 if traffic_table_ref.current:
                     traffic_table_ref.current.rows = rows
-                page_info_text.value = f"Page {pagination_state['current_page'] + 1} / {total_pages}  ({total} paquets)"
-                btn_prev.disabled = pagination_state["current_page"] <= 0
-                btn_next.disabled = pagination_state["current_page"] >= total_pages - 1
-                page.update()
+                    page.update()
 
             def filter_traffic(e=None):
-                pagination_state["current_page"] = 0
                 ip = ip_filter.value
                 typ = type_filter.value
-                ver = version_filter.value
-                load_traffic_data(ip, typ, ver, 0)
+                load_traffic_data(ip, typ)
                 self.show_snackbar(page, "Filtres appliqués (Recherche BDD)", ft.Colors.BLUE)
-
-            def go_prev(e):
-                load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"] - 1)
-
-            def go_next(e):
-                load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"] + 1)
-
-            btn_prev.on_click = go_prev
-            btn_next.on_click = go_next
 
             # Filtres UI
             ip_filter = ft.TextField(
@@ -502,17 +497,6 @@ class SNMPMonitorApp:
                 on_change=filter_traffic
             )
 
-            version_filter = ft.Dropdown(
-                hint_text="Version SNMP",
-                options=[
-                    ft.dropdown.Option("Toutes"),
-                    ft.dropdown.Option("v2c"),
-                    ft.dropdown.Option("v3")
-                ],
-                width=150,
-                on_change=filter_traffic
-            )
-
             # Table
             traffic_table = ft.DataTable(
                 ref=traffic_table_ref,
@@ -528,24 +512,24 @@ class SNMPMonitorApp:
             )
 
             # Chargement initial
+            # On utilise un petit délai pour laisser le temps au composant de se monter
+            # (ou on appelle juste après le return mais dans Flet c'est synchrone ici)
             load_traffic_data()
 
             return ft.Column([
                 ft.Row([
                     ft.Text("Traffic SNMP (BDD)", size=24, weight=ft.FontWeight.BOLD),
-                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=lambda e: load_traffic_data(ip_filter.value, type_filter.value, version_filter.value, pagination_state["current_page"]))
+                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=lambda e: load_traffic_data(ip_filter.value, type_filter.value))
                 ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
                 ft.Container(height=15),
-                ft.Row([ip_filter, type_filter, version_filter, ft.ElevatedButton("Filtrer", on_click=filter_traffic)], spacing=15),
+                ft.Row([ip_filter, type_filter, ft.ElevatedButton("Filtrer", on_click=filter_traffic)], spacing=15),
                 ft.Container(height=25),
                 ft.Card(
                     content=ft.Container(
                         content=ft.Column([
                             ft.Text("Paquets enregistrés", size=14, color=ft.Colors.GREY_600),
                             ft.Container(height=10),
-                            traffic_table,
-                            ft.Container(height=10),
-                            ft.Row([btn_prev, page_info_text, btn_next], alignment=ft.MainAxisAlignment.CENTER),
+                            traffic_table
                         ]), padding=15
                     ), elevation=2
                 )
@@ -567,6 +551,197 @@ class SNMPMonitorApp:
                 ft.Text("Module d'analyse statistique", color=ft.Colors.GREY)
             ])
 
+        def create_stats_page():
+            def refresh_stats(e=None):
+                main_content.content = create_stats_page()
+                page.update()
+                self.show_snackbar(page, "Statistiques actualisées", ft.Colors.GREEN)
+
+            data = self.get_stats_data()
+
+            pdu_colors = [
+                ft.Colors.GREEN, ft.Colors.ORANGE, ft.Colors.PINK_700,
+                ft.Colors.RED, ft.Colors.PURPLE, ft.Colors.AMBER,
+                ft.Colors.CYAN, ft.Colors.LIME,
+            ]
+            version_colors = {"v3": ft.Colors.TEAL, "v2c": ft.Colors.BLUE_GREY}
+
+            # --- PieChart : Types PDU ---
+            total_pdu = sum(r[1] for r in data["pdu_types"]) or 1
+            pdu_sections = []
+            pdu_legend_items = []
+            for i, r in enumerate(data["pdu_types"]):
+                pct = r[1] / total_pdu * 100
+                color = pdu_colors[i % len(pdu_colors)]
+                pdu_sections.append(ft.PieChartSection(
+                    value=r[1], title="", color=color, radius=110,
+                ))
+                pdu_legend_items.append(ft.Row([
+                    ft.Container(width=14, height=14, bgcolor=color, border_radius=3),
+                    ft.Text(f"{r[0]}", size=12, weight=ft.FontWeight.W_500),
+                    ft.Text(f"({r[1]} - {pct:.1f}%)", size=11, color=ft.Colors.GREY_600),
+                ], spacing=8))
+            if not pdu_sections:
+                pdu_sections.append(ft.PieChartSection(
+                    value=1, title="", color=ft.Colors.GREY, radius=110
+                ))
+                pdu_legend_items.append(ft.Text("Aucune donnée", italic=True, color=ft.Colors.GREY))
+            pie_pdu = ft.Row([
+                ft.Container(
+                    content=ft.PieChart(sections=pdu_sections, sections_space=2, center_space_radius=0, expand=True),
+                    expand=2,
+                ),
+                ft.Container(
+                    content=ft.Column(pdu_legend_items, spacing=8, alignment=ft.MainAxisAlignment.CENTER),
+                    expand=1, padding=ft.padding.only(left=10),
+                ),
+            ])
+
+            # --- PieChart : Versions SNMP ---
+            total_ver = sum(r[1] for r in data["versions"]) or 1
+            ver_sections = []
+            for r in data["versions"]:
+                pct = r[1] / total_ver * 100
+                c = version_colors.get(str(r[0]).lower(), ft.Colors.GREY)
+                ver_sections.append(ft.PieChartSection(
+                    value=r[1],
+                    title=f"{r[0]}\n{pct:.1f}%",
+                    color=c,
+                    radius=110,
+                    title_style=ft.TextStyle(
+                        size=12, color=ft.Colors.WHITE,
+                        weight=ft.FontWeight.BOLD,
+                    ),
+                    title_position=0.6,
+                ))
+            if not ver_sections:
+                ver_sections.append(ft.PieChartSection(
+                    value=1, title="Aucune donnée", color=ft.Colors.GREY, radius=110
+                ))
+            pie_ver = ft.PieChart(
+                sections=ver_sections, sections_space=2,
+                center_space_radius=0, expand=True,
+            )
+
+            # --- BarChart : Top 10 IPs ---
+            bar_groups = []
+            bar_labels = []
+            max_bar = max((r[1] for r in data["top_ips"]), default=0)
+            bar_palette = [
+                ft.Colors.BLUE_700, ft.Colors.BLUE_500, ft.Colors.BLUE_400,
+                ft.Colors.INDIGO_400, ft.Colors.INDIGO_300, ft.Colors.CYAN_600,
+                ft.Colors.CYAN_400, ft.Colors.TEAL_400, ft.Colors.TEAL_300,
+                ft.Colors.LIGHT_BLUE_400,
+            ]
+            for i, r in enumerate(data["top_ips"]):
+                bar_groups.append(ft.BarChartGroup(
+                    x=i,
+                    bar_rods=[ft.BarChartRod(
+                        from_y=0, to_y=r[1], width=22,
+                        color=bar_palette[i % len(bar_palette)],
+                        tooltip=f"{r[0]}: {r[1]}",
+                        border_radius=4,
+                    )],
+                ))
+                ip_label = str(r[0])
+                if len(ip_label) > 13:
+                    ip_label = ".." + ip_label[-11:]
+                bar_labels.append(ft.ChartAxisLabel(
+                    value=i,
+                    label=ft.Container(
+                        ft.Text(ip_label, size=8),
+                        padding=ft.padding.only(top=5),
+                    ),
+                ))
+            if bar_groups:
+                bar_chart = ft.BarChart(
+                    bar_groups=bar_groups,
+                    bottom_axis=ft.ChartAxis(labels=bar_labels, labels_size=40),
+                    left_axis=ft.ChartAxis(labels_size=50),
+                    tooltip_bgcolor=ft.Colors.GREY_800,
+                    max_y=(max_bar * 1.15) if max_bar > 0 else 10,
+                    expand=True,
+                )
+            else:
+                bar_chart = ft.Container(
+                    ft.Text("Aucune donnée", italic=True, color=ft.Colors.GREY),
+                    alignment=ft.alignment.center, expand=True,
+                )
+
+            # --- LineChart : Trafic temporel (30 derniers jours) ---
+            temporal = data["temporal"]
+            line_points = []
+            line_labels = []
+            max_line = 0
+            step = max(1, len(temporal) // 6)
+            for i, r in enumerate(temporal):
+                cnt = r[1]
+                if cnt > max_line:
+                    max_line = cnt
+                line_points.append(ft.LineChartDataPoint(i, cnt))
+                day_str = str(r[0])[-5:]  # MM-DD
+                if i % step == 0 or i == len(temporal) - 1:
+                    line_labels.append(ft.ChartAxisLabel(
+                        value=i,
+                        label=ft.Container(
+                            ft.Text(day_str, size=8),
+                            padding=ft.padding.only(top=5),
+                        ),
+                    ))
+            if line_points:
+                line_chart = ft.LineChart(
+                    data_series=[ft.LineChartData(
+                        data_points=line_points,
+                        stroke_width=3,
+                        color=ft.Colors.BLUE_700,
+                        curved=True,
+                        stroke_cap_round=True,
+                    )],
+                    bottom_axis=ft.ChartAxis(labels=line_labels, labels_size=40),
+                    left_axis=ft.ChartAxis(labels_size=50),
+                    tooltip_bgcolor=ft.Colors.GREY_800,
+                    max_y=(max_line * 1.15) if max_line > 0 else 10,
+                    max_x=max(len(temporal) - 1, 0),
+                    min_x=0, min_y=0,
+                    expand=True,
+                )
+            else:
+                line_chart = ft.Container(
+                    ft.Text("Aucune donnée temporelle", italic=True, color=ft.Colors.GREY),
+                    alignment=ft.alignment.center, expand=True,
+                )
+
+            def chart_card(title, icon, chart, height=280):
+                return ft.Card(
+                    content=ft.Container(
+                        content=ft.Column([
+                            ft.Row([
+                                ft.Icon(icon, color=ft.Colors.BLUE_700),
+                                ft.Text(title, size=15, weight=ft.FontWeight.BOLD),
+                            ]),
+                            ft.Divider(),
+                            ft.Container(content=chart, height=height),
+                        ]),
+                        padding=15,
+                    ),
+                    elevation=2, expand=True,
+                )
+
+            return ft.Column([
+                ft.Row([
+                    ft.Text("Statistiques", size=24, weight=ft.FontWeight.BOLD),
+                    ft.IconButton(icon=ft.Icons.REFRESH, on_click=refresh_stats),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Container(height=10),
+                chart_card("Distribution par Type PDU", ft.Icons.PIE_CHART, pie_pdu, height=350),
+                ft.Container(height=15),
+                chart_card("Distribution par Version SNMP", ft.Icons.DONUT_LARGE, pie_ver),
+                ft.Container(height=15),
+                chart_card("Top 10 Sources IP", ft.Icons.BAR_CHART, bar_chart),
+                ft.Container(height=15),
+                chart_card("Trafic (30 derniers jours)", ft.Icons.SHOW_CHART, line_chart),
+            ], expand=True, scroll=ft.ScrollMode.AUTO)
+
         # Gestion Navigation
         def on_navigation_change(e):
             selected_index = e.control.selected_index
@@ -578,6 +753,8 @@ class SNMPMonitorApp:
                 main_content.content = create_send_page()
             elif selected_index == 3:
                 main_content.content = create_anomalies_page()
+            elif selected_index == 4:
+                main_content.content = create_stats_page()
             page.update()
 
         self.on_navigation_change = on_navigation_change
