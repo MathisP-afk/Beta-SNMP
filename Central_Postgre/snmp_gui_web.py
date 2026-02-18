@@ -10,6 +10,7 @@ Adaptations:
 """
 
 import os
+import sys
 from dotenv import load_dotenv
 load_dotenv()
 import json
@@ -19,7 +20,8 @@ from datetime import datetime
 # Import de la classe PostgreSQL
 from snmp_database_postgre import SNMPDatabase
 
-# Import du module d'envoi SNMP
+# Import du module d'envoi SNMP (partage avec Centrale_SQLite)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 try:
     from snmp_sender import send_get, send_getnext, send_set, send_trap, SNMPResult, PYSNMP_AVAILABLE
     SNMP_SENDER_AVAILABLE = True
