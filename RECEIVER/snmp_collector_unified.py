@@ -10,10 +10,13 @@ Description: Collecteur SNMP hybride supportant v2c et v3.
              - Envoi à l'API REST (/snmp/v2c/add ou /snmp/v3/add)
 
 Dépendances:
-    pip install pysnmp pycryptodomex cryptography requests scapy
+    pip install pysnmp pycryptodomex cryptography requests scapy python-dotenv
 
 Usage:
-    # Capture passive v2c uniquement
+    # Configurer le fichier .env puis lancer sans arguments
+    python snmp_collector_unified.py
+
+    # Ou surcharger via arguments CLI (prioritaires sur le .env)
     python snmp_collector_unified.py -a https://API:8000 -k CLE -i "Ethernet 2"
 
     # Capture passive v2c+v3 + polling actif v3
@@ -26,6 +29,7 @@ import asyncio
 import hashlib
 import datetime
 import sys
+import os
 import argparse
 import threading
 import queue
@@ -33,8 +37,13 @@ import requests
 import logging
 import time
 import re
+from collections import deque
 from typing import Dict, List, Optional
 import urllib3
+from dotenv import load_dotenv
+
+# Charger le .env depuis le même dossier que le script
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -507,6 +516,73 @@ def parse_v2c_raw(raw_bytes: bytes) -> Optional[Dict]:
 
 
 # ============================================================================
+# TRACKER IP (détection flood, brute-force, scan)
+# ============================================================================
+
+class IPTracker:
+    """Tracker thread-safe par IP source pour détecter les comportements suspects."""
+
+    def __init__(self, flood_window: int = 60, bruteforce_window: int = 120):
+        self.flood_window = flood_window
+        self.bruteforce_window = bruteforce_window
+        self._data: Dict[str, dict] = {}
+        self._lock = threading.Lock()
+
+    def _get_entry(self, ip: str) -> dict:
+        if ip not in self._data:
+            self._data[ip] = {
+                'timestamps': deque(),
+                'communities': set(),
+                'auth_failures': deque(),
+                'oids_queried': set(),
+                'last_cleanup': time.time(),
+            }
+        return self._data[ip]
+
+    def _cleanup(self, entry: dict):
+        now = time.time()
+        if now - entry['last_cleanup'] < 10:
+            return
+        cutoff_flood = now - self.flood_window
+        while entry['timestamps'] and entry['timestamps'][0] < cutoff_flood:
+            entry['timestamps'].popleft()
+        cutoff_bf = now - self.bruteforce_window
+        while entry['auth_failures'] and entry['auth_failures'][0] < cutoff_bf:
+            entry['auth_failures'].popleft()
+        if not entry['timestamps']:
+            entry['oids_queried'].clear()
+            entry['communities'].clear()
+        entry['last_cleanup'] = now
+
+    def record_packet(self, ip: str, community: str = None, oids: list = None):
+        with self._lock:
+            entry = self._get_entry(ip)
+            self._cleanup(entry)
+            entry['timestamps'].append(time.time())
+            if community:
+                entry['communities'].add(community)
+            if oids:
+                for oid in oids:
+                    entry['oids_queried'].add(oid)
+
+    def record_auth_failure(self, ip: str):
+        with self._lock:
+            entry = self._get_entry(ip)
+            entry['auth_failures'].append(time.time())
+
+    def get_stats(self, ip: str) -> dict:
+        with self._lock:
+            entry = self._get_entry(ip)
+            self._cleanup(entry)
+            return {
+                'req_count': len(entry['timestamps']),
+                'community_count': len(entry['communities']),
+                'auth_failure_count': len(entry['auth_failures']),
+                'oid_count': len(entry['oids_queried']),
+            }
+
+
+# ============================================================================
 # FILE D'ATTENTE THREAD-SAFE
 # ============================================================================
 
@@ -566,6 +642,35 @@ class UnifiedSNMPCollector:
         self.v3_enabled = all([switch_ip, username, auth_password, priv_password])
         self.v3_decrypt = bool(priv_password) and CRYPTO_AVAILABLE
 
+        # Détection avancée — config depuis .env
+        wl = os.environ.get('SNMP_WHITELIST_IPS', '')
+        self.whitelist_ips = set(
+            ip.strip() for ip in wl.split(',') if ip.strip()
+        )
+        kc = os.environ.get('SNMP_KNOWN_COMMUNITIES', 'public,private')
+        self.known_communities = set(
+            c.strip() for c in kc.split(',') if c.strip()
+        )
+        ku = os.environ.get('SNMP_KNOWN_V3_USERS', '')
+        self.known_v3_users = set(
+            u.strip() for u in ku.split(',') if u.strip()
+        )
+        self.flood_threshold = int(
+            os.environ.get('SNMP_FLOOD_THRESHOLD', '50'))
+        self.flood_critical = int(
+            os.environ.get('SNMP_FLOOD_CRITICAL', '200'))
+        self.flood_window = int(
+            os.environ.get('SNMP_FLOOD_WINDOW', '60'))
+        self.bruteforce_threshold = int(
+            os.environ.get('SNMP_BRUTEFORCE_THRESHOLD', '5'))
+        self.bruteforce_window = int(
+            os.environ.get('SNMP_BRUTEFORCE_WINDOW', '120'))
+
+        self.ip_tracker = IPTracker(
+            flood_window=self.flood_window,
+            bruteforce_window=self.bruteforce_window,
+        )
+
         self.packet_queue = SNMPPacketQueue(max_size=100000)
         self.running = True
         self.worker_threads = []
@@ -603,6 +708,18 @@ class UnifiedSNMPCollector:
                          f"{'OUI' if HLAPI_AVAILABLE else 'NON'}")
         else:
             logger.info("[INIT] Mode v3: NON (capture passive v2c uniquement)")
+        logger.info(f"[INIT] Whitelist IPs: "
+                     f"{', '.join(self.whitelist_ips) or 'aucune'}")
+        logger.info(f"[INIT] Communautés connues: "
+                     f"{', '.join(self.known_communities)}")
+        logger.info(f"[INIT] Utilisateurs v3 connus: "
+                     f"{', '.join(self.known_v3_users) or 'aucun'}")
+        logger.info(f"[INIT] Seuils flood: "
+                     f"{self.flood_threshold}/{self.flood_critical} "
+                     f"en {self.flood_window}s")
+        logger.info(f"[INIT] Seuil brute-force: "
+                     f"{self.bruteforce_threshold} "
+                     f"en {self.bruteforce_window}s")
         logger.info("=" * 60)
 
     # ----------------------------------------------------------------
@@ -625,13 +742,17 @@ class UnifiedSNMPCollector:
     # ANALYSE DE SÉVÉRITÉ
     # ----------------------------------------------------------------
 
-    def analyser_severite(self, packet_info: Dict) -> str:
+    def analyser_severite(self, packet_info: Dict,
+                          src_ip: str = None) -> tuple:
+        """Analyse la sévérité d'un paquet. Retourne (niveau, raisons)."""
         contenu = packet_info.get('contenu', {})
         varbinds = contenu.get('varbinds', [])
         type_pdu = packet_info.get('type_pdu', '')
         is_trap = type_pdu == 'Trap'
         score = 0
+        raisons = []
 
+        # --- Règles existantes (par paquet individuel) ---
         if type_pdu == 'SetRequest':
             score += 25
         if is_trap:
@@ -662,13 +783,69 @@ class UnifiedSNMPCollector:
                 if 'sysName' in nom:
                     score += 30
 
+        # --- Nouvelles règles (comportement dans le temps) ---
+        if src_ip:
+            is_whitelisted = src_ip in self.whitelist_ips
+            ip_stats = self.ip_tracker.get_stats(src_ip)
+
+            # Flood / spam
+            if not is_whitelisted:
+                if ip_stats['req_count'] >= self.flood_critical:
+                    score += 80
+                    raisons.append(
+                        f"FLOOD CRITIQUE: {ip_stats['req_count']} req/"
+                        f"{self.flood_window}s")
+                elif ip_stats['req_count'] >= self.flood_threshold:
+                    score += 30
+                    raisons.append(
+                        f"Flood: {ip_stats['req_count']} req/"
+                        f"{self.flood_window}s")
+
+            # Mauvaise communauté (v2c)
+            community = packet_info.get('community')
+            if community and community not in self.known_communities:
+                score += 25
+                raisons.append(
+                    f"Communauté inconnue: {community}")
+
+            # Scan de communautés (plusieurs distinctes depuis même IP)
+            if ip_stats['community_count'] > 2:
+                score += 50
+                raisons.append(
+                    f"Scan communautés: {ip_stats['community_count']} "
+                    f"tentées")
+
+            # Brute-force auth v3
+            if ip_stats['auth_failure_count'] >= self.bruteforce_threshold:
+                score += 60
+                raisons.append(
+                    f"Brute-force auth: "
+                    f"{ip_stats['auth_failure_count']} échecs/"
+                    f"{self.bruteforce_window}s")
+
+            # Scan / reconnaissance (grand nombre d'OIDs distincts)
+            if not is_whitelisted and ip_stats['oid_count'] > 30:
+                score += 30
+                raisons.append(
+                    f"Scan OIDs: {ip_stats['oid_count']} OIDs distincts")
+
+            # Utilisateur v3 inconnu
+            utilisateur = packet_info.get('utilisateur')
+            if (utilisateur and self.known_v3_users
+                    and utilisateur not in self.known_v3_users):
+                score += 25
+                raisons.append(
+                    f"Utilisateur v3 inconnu: {utilisateur}")
+
         if score >= 50:
-            return 'CRITIQUE'
+            niveau = 'CRITIQUE'
         elif score >= 20:
-            return 'ELEVEE'
+            niveau = 'ELEVEE'
         elif score > 0:
-            return 'SUSPECT'
-        return 'NORMAL'
+            niveau = 'SUSPECT'
+        else:
+            niveau = 'NORMAL'
+        return niveau, raisons
 
     # ----------------------------------------------------------------
     # PARSING V2C (via parseur BER, indépendant de Scapy SNMP layer)
@@ -857,17 +1034,37 @@ class UnifiedSNMPCollector:
                 if not packet_info:
                     return
 
+                # Enregistrer dans le tracker IP
+                community = packet_info.get('community')
+                oids = [vb.get('oid', '') for vb
+                        in packet_info.get('contenu', {}).get('varbinds', [])
+                        if vb.get('oid')]
+                self.ip_tracker.record_packet(
+                    src_ip, community=community, oids=oids)
+
+                # Enregistrer AUTH_FAILURE dans le tracker
+                trap_type = packet_info.get('contenu', {}).get(
+                    'trap_type', '')
+                if trap_type == 'AUTH_FAILURE':
+                    self.ip_tracker.record_auth_failure(src_ip)
+
                 # Analyse de sévérité
-                severite = self.analyser_severite(packet_info)
+                severite, raisons = self.analyser_severite(
+                    packet_info, src_ip=src_ip)
 
                 if severite in ['SUSPECT', 'ELEVEE', 'CRITIQUE']:
+                    if raisons:
+                        msg = '; '.join(raisons)
+                    else:
+                        msg = (f"{packet_info['type_pdu']} suspect "
+                               f"{src_ip}->{dst_ip}")
                     packet_info['contenu']['alerte_securite'] = {
                         'niveau': severite,
-                        'message': f"{packet_info['type_pdu']} suspect "
-                                   f"{src_ip}->{dst_ip}",
+                        'message': msg,
                         'timestamp': datetime.datetime.now().isoformat(),
                         'details': f"PDU: {packet_info['type_pdu']}",
-                        'action_requise': f"Vérifier {src_ip}"
+                        'action_requise': f"Vérifier {src_ip}",
+                        'raisons': raisons,
                     }
                     with self.stats_lock:
                         self.stats['alerts'] += 1
@@ -879,10 +1076,14 @@ class UnifiedSNMPCollector:
                     pdu_type = packet_info['type_pdu']
                     vb_count = len(
                         packet_info['contenu'].get('varbinds', []))
+                    extra = ''
+                    if raisons:
+                        extra = f" | {'; '.join(raisons)}"
                     logger.info(
                         f"[SNIFFER] [{v_tag}] {src_ip}:{src_port} -> "
                         f"{dst_ip}:{dst_port} | "
-                        f"{pdu_type} | {vb_count} OIDs | Sev: {severite}"
+                        f"{pdu_type} | {vb_count} OIDs | "
+                        f"Sev: {severite}{extra}"
                     )
 
             except Exception as e:
@@ -1258,19 +1459,24 @@ Exemples:
         """
     )
 
-    # Requis
-    parser.add_argument('-a', '--api', required=True,
-                        help="URL de l'API (ex: https://10.204.0.158:8000)")
-    parser.add_argument('-k', '--key', required=True,
-                        help="Clé API pour l'authentification")
+    # Requis (sauf si défini dans .env)
+    parser.add_argument('-a', '--api',
+                        default=os.environ.get('SNMP_API_URL'),
+                        help="URL de l'API (env: SNMP_API_URL)")
+    parser.add_argument('-k', '--key',
+                        default=os.environ.get('SNMP_API_KEY'),
+                        help="Clé API (env: SNMP_API_KEY)")
 
     # Optionnel (général)
-    parser.add_argument('-i', '--interface', default=None,
-                        help='Interface réseau pour Scapy (ex: "Ethernet 2")')
-    parser.add_argument('-w', '--workers', type=int, default=3,
-                        help='Nombre de threads workers (défaut: 3)')
-    parser.add_argument('-p', '--port', type=int, default=162,
-                        help="Port d'écoute (défaut: 162)")
+    parser.add_argument('-i', '--interface',
+                        default=os.environ.get('SNMP_INTERFACE'),
+                        help='Interface réseau pour Scapy (env: SNMP_INTERFACE)')
+    parser.add_argument('-w', '--workers', type=int,
+                        default=int(os.environ.get('SNMP_WORKERS', '3')),
+                        help='Nombre de threads workers (env: SNMP_WORKERS, défaut: 3)')
+    parser.add_argument('-p', '--port', type=int,
+                        default=int(os.environ.get('SNMP_PORT', '162')),
+                        help="Port d'écoute (env: SNMP_PORT, défaut: 162)")
     parser.add_argument('-q', '--quiet', action='store_true',
                         help='Mode silencieux')
 
@@ -1278,20 +1484,32 @@ Exemples:
     v3_group = parser.add_argument_group(
         'SNMPv3 (optionnel)',
         'Paramètres pour le polling actif et le déchiffrement v3')
-    v3_group.add_argument('-s', '--switch', default=None,
-                          help='Adresse IP du switch (active le polling v3)')
-    v3_group.add_argument('-u', '--username', default=None,
-                          help="Nom d'utilisateur SNMPv3")
-    v3_group.add_argument('--auth-password', default=None,
-                          help="Mot de passe d'authentification (SHA)")
-    v3_group.add_argument('--priv-password', default=None,
-                          help='Mot de passe de chiffrement (DES)')
-    v3_group.add_argument('-e', '--engine-id', default=None,
-                          help='Engine ID du switch en hexadécimal')
-    v3_group.add_argument('--poll-interval', type=int, default=60,
-                          help='Intervalle entre polls actifs (défaut: 60s)')
+    v3_group.add_argument('-s', '--switch',
+                          default=os.environ.get('SNMP_SWITCH_IP'),
+                          help='Adresse IP du switch (env: SNMP_SWITCH_IP)')
+    v3_group.add_argument('-u', '--username',
+                          default=os.environ.get('SNMP_V3_USERNAME'),
+                          help="Nom d'utilisateur SNMPv3 (env: SNMP_V3_USERNAME)")
+    v3_group.add_argument('--auth-password',
+                          default=os.environ.get('SNMP_V3_AUTH_PASSWORD'),
+                          help="Mot de passe auth SHA (env: SNMP_V3_AUTH_PASSWORD)")
+    v3_group.add_argument('--priv-password',
+                          default=os.environ.get('SNMP_V3_PRIV_PASSWORD'),
+                          help='Mot de passe chiffrement DES (env: SNMP_V3_PRIV_PASSWORD)')
+    v3_group.add_argument('-e', '--engine-id',
+                          default=os.environ.get('SNMP_V3_ENGINE_ID'),
+                          help='Engine ID en hexadécimal (env: SNMP_V3_ENGINE_ID)')
+    v3_group.add_argument('--poll-interval', type=int,
+                          default=int(os.environ.get('SNMP_POLL_INTERVAL', '60')),
+                          help='Intervalle entre polls actifs (env: SNMP_POLL_INTERVAL, défaut: 60s)')
 
     args = parser.parse_args()
+
+    # Vérifier que API et KEY sont définis (via .env ou CLI)
+    if not args.api:
+        parser.error("URL de l'API requise (-a ou SNMP_API_URL dans .env)")
+    if not args.key:
+        parser.error("Clé API requise (-k ou SNMP_API_KEY dans .env)")
 
     if args.quiet:
         logging.getLogger().setLevel(logging.WARNING)
