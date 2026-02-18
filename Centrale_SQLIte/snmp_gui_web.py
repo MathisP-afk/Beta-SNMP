@@ -35,7 +35,7 @@ class SNMPMonitorApp:
         # Initialisation de la connexion BDD
 
         try:
-            self.db = SNMPDatabase("exemple_snmp.db")
+            self.db = SNMPDatabase()
             print("✅ Connexion BDD SQLite réussie dans l'interface graphique")
         except Exception as e:
             print(f"❌ Erreur connexion SQLite: {e}")

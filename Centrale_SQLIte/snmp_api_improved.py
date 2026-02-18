@@ -1,6 +1,7 @@
 # API SNMP AMÉLIORÉE - FastAPI avec gestion des clés API en BDD
 # Adaptée pour la nouvelle version de snmp_database.py
 
+import os
 from snmp_database import SNMPDatabase
 from fastapi import FastAPI, HTTPException, Depends, status, BackgroundTasks
 from pydantic import BaseModel, Field, field_validator
@@ -14,8 +15,7 @@ from sms_alerter import envoyer_sms_alerte
 # INITIALISATION DE L'API ET DE LA BASE DE DONNÉES
 # ============================================================================
 
-db = SNMPDatabase("exemple_snmp.db")
-db.ajouter_cle_api(description="Clé initiale générée au démarrage de l'API")
+db = SNMPDatabase()
 app = FastAPI(
     title="API SNMP Monitoring",
     description="API pour gérer les trames SNMP, utilisateurs et clés API",

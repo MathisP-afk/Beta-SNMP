@@ -1,6 +1,7 @@
 import sqlite3
 import hashlib
 import json
+import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 import secrets
@@ -10,7 +11,12 @@ class SNMPDatabase:
     Classe pour gérer la base de données SNMP avec tables utilisateurs et paquets reçus
     """
     
-    def __init__(self, db_path: str = "exemple_snmp.db", log_file: str = "logs_"+datetime.now().strftime('%d-%m-%Y')+".log"):
+    def __init__(self, db_path: str = None, log_file: str = None):
+        if db_path is None:
+            db_path = os.environ.get("DB_PATH", "exemple_snmp.db")
+        if log_file is None:
+            log_dir = os.environ.get("LOG_DIR", ".")
+            log_file = os.path.join(log_dir, "logs_"+datetime.now().strftime('%d-%m-%Y')+".log")
         """
         Initialise la connexion à la base de données
         
