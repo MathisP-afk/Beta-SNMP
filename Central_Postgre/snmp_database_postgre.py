@@ -24,7 +24,10 @@ class SNMPDatabase:
                  database: str = os.environ.get("POSTGRES_DB", "snmpdatabase"),
                  user: str = os.environ.get("POSTGRES_USER", "SylvAdminBDD"),
                  password: str = os.environ.get("POSTGRES_PASSWORD", ""),
-                 log_file: str = "logs_"+datetime.now().strftime('%d-%m-%Y')+".log"):
+                 log_file: str = None):
+        if log_file is None:
+            log_dir = os.environ.get("LOG_DIR", ".")
+            log_file = os.path.join(log_dir, "logs_"+datetime.now().strftime('%d-%m-%Y')+".log")
         """
         Initialise la connexion à la base de données PostgreSQL
         """
