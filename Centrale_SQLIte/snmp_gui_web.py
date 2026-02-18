@@ -37,7 +37,7 @@ class SNMPMonitorApp:
         # Initialisation de la connexion BDD
 
         try:
-            self.db = SNMPDatabase("exemple_snmp.db")
+            self.db = SNMPDatabase()
             print("✅ Connexion BDD SQLite réussie dans l'interface graphique")
         except Exception as e:
             print(f"❌ Erreur connexion SQLite: {e}")
@@ -1450,7 +1450,7 @@ if __name__ == "__main__":
         target=app.main,
         view=ft.WEB_BROWSER,
         host="0.0.0.0",
-        port=12000,
+        port=int(os.environ.get("GUI_PORT", "12000")),
         assets_dir="assets",
         
     )

@@ -550,7 +550,7 @@ def exemple_utilisation():
     print("🚀 === EXEMPLE D'UTILISATION DE LA BASE DE DONNÉES SNMP ===")
     
     # Initialisation
-    db = SNMPDatabase("exemple_snmp.db")
+    db = SNMPDatabase()
     
     print("\n📝 === GESTION DES UTILISATEURS ===")
     
