@@ -6,5 +6,6 @@ requests==2.32.5
 twilio==9.10.1
 python-dotenv==1.1.1
 pysnmp==7.1.22
+pysnmpcrypto
 pycryptodomex
 psycopg2-binary
