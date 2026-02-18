@@ -1442,7 +1442,7 @@ if __name__ == "__main__":
     ft.app(
         target=app.main,
         view=ft.WEB_BROWSER,         # <— mode Web
-        port=0,                      # port aléatoire
+        port=12000,
         assets_dir="assets",          # si vous avez des assets (images, fonts…)
         
     )
