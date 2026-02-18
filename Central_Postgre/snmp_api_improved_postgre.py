@@ -18,7 +18,6 @@ from sms_alerter import envoyer_sms_alerte
 # ============================================================================
 
 db = SNMPDatabase()
-db.ajouter_cle_api(description="Clé initiale générée au démarrage de l'API")
 app = FastAPI(
     title="API SNMP Monitoring",
     description="API pour gérer les trames SNMP, utilisateurs et clés API",

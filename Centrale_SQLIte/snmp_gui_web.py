@@ -308,16 +308,16 @@ class SNMPMonitorApp:
             for pkt in recent_packets:
                 icon = ft.Icons.HELP_OUTLINE
                 color = ft.Colors.GREY
-                if 'GET' in str(pkt.get('type_pdu', '')):
+                if 'GET' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.GET_APP
                     color = ft.Colors.GREEN
-                elif 'SET' in str(pkt.get('type_pdu', '')):
+                elif 'SET' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.SEND
                     color = ft.Colors.ORANGE
-                elif 'TRAP' in str(pkt.get('type_pdu', '')):
+                elif 'TRAP' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.WARNING
                     color = ft.Colors.RED
-                elif 'RESPONSE' in str(pkt.get('type_pdu', '')):
+                elif 'RESPONSE' in str(pkt.get('type_pdu', '')).upper():
                     icon = ft.Icons.TRY_SMS_STAR_ROUNDED
                     color = ft.Colors.PINK_700
                 elif 'REPORT' in str(pkt.get('type_pdu', '')).upper():
@@ -342,7 +342,7 @@ class SNMPMonitorApp:
                     ft.ListTile(
                         leading=ft.CircleAvatar(content=ft.Icon(icon, color=ft.Colors.WHITE), bgcolor=color),
                         title=ft.Text(titre_pdu),
-                        subtitle=ft.Text(f"{pkt.get('adresse_source')} → {pkt.get('oid_racine', 'N/A')}"),
+                        subtitle=ft.Text(f"[{pkt.get('version_snmp', '?')}] {pkt.get('adresse_source')} → {pkt.get('oid_racine', 'N/A')}"),
                         trailing=ft.Text(str(pkt.get('timestamp_reception'))[11:19], color=ft.Colors.GREY_500)
                     )
                 )
@@ -532,6 +532,12 @@ class SNMPMonitorApp:
                             ft.DataCell(ft.Text(str(p.get('timestamp_reception', ''))[11:19], size=12)),
                             ft.DataCell(ft.Text(p.get('adresse_source', ''), size=12, weight=ft.FontWeight.BOLD)),
                             ft.DataCell(ft.Container(
+                                ft.Text(str(p.get('version_snmp', 'N/A')), color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
+                                bgcolor=ft.Colors.TEAL if str(p.get('version_snmp', '')).lower() == 'v3' else ft.Colors.BLUE_GREY,
+                                padding=ft.padding.symmetric(horizontal=8, vertical=4),
+                                border_radius=4,
+                            )),
+                            ft.DataCell(ft.Container(
                                 ft.Text(t_pdu[:15], color=ft.Colors.WHITE, size=11, weight=ft.FontWeight.BOLD),
                                 bgcolor=ft.Colors.BLUE_700,
                                 padding=ft.padding.symmetric(horizontal=8, vertical=4),
@@ -634,6 +640,7 @@ class SNMPMonitorApp:
                 columns=[
                     ft.DataColumn(ft.Text("Heure", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Source", weight=ft.FontWeight.BOLD)),
+                    ft.DataColumn(ft.Text("Version", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Type", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("OID", weight=ft.FontWeight.BOLD)),
                     ft.DataColumn(ft.Text("Statut", weight=ft.FontWeight.BOLD)),
