@@ -1439,8 +1439,9 @@ if __name__ == "__main__":
     app = SNMPMonitorApp()
     ft.app(
         target=app.main,
-        view=ft.WEB_BROWSER,         # <— mode Web
+        view=ft.WEB_BROWSER,
+        host="0.0.0.0",
         port=12000,
-        assets_dir="assets",          # si vous avez des assets (images, fonts…)
+        assets_dir="assets",
         
     )
