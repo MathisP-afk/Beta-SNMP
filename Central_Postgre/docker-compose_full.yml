@@ -1,0 +1,115 @@
+# docker-compose_full.yml — Traefik reverse proxy + Let's Encrypt automatique (DNS OVH)
+#
+# Deploiement :
+#   1. Remplir .env (DOMAIN, CERTBOT_EMAIL, credentials OVH, etc.)
+#   2. docker compose -f docker-compose_full.yml up -d
+#   Traefik obtient et renouvelle les certificats automatiquement.
+
+services:
+  # ---------- Base de donnees ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+
+    env_file:
+      - .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - postgres_network
+
+  # ---------- Application (API + GUI) ----------
+  centrale-postgre:
+    build: .
+    container_name: centrale-postgre
+    restart: unless-stopped
+
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+
+    volumes:
+      - centrale_logs:/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    labels:
+      - "traefik.enable=true"
+
+      # --- API : api.DOMAIN → :8000 ---
+      - "traefik.http.routers.api.rule=Host(`${API_SUBDOMAIN:-api}.${DOMAIN}`)"
+      - "traefik.http.routers.api.entrypoints=websecure"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.service=api"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+
+      # --- GUI : DOMAIN → :12000 (avec WebSocket Flet) ---
+      - "traefik.http.routers.gui.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.gui.entrypoints=websecure"
+      - "traefik.http.routers.gui.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.gui.service=gui"
+      - "traefik.http.services.gui.loadbalancer.server.port=12000"
+
+    networks:
+      - postgres_network
+
+  # ---------- Reverse proxy + TLS automatique ----------
+  traefik:
+    image: traefik:v3
+    container_name: traefik
+    restart: unless-stopped
+
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=postgres_network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Redirection HTTP → HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      # Let's Encrypt via DNS OVH
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=ovh"
+      - "--certificatesresolvers.letsencrypt.acme.email=${CERTBOT_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    environment:
+      OVH_ENDPOINT: ovh-eu
+      OVH_APPLICATION_KEY: ${OVH_APPLICATION_KEY}
+      OVH_APPLICATION_SECRET: ${OVH_APPLICATION_SECRET}
+      OVH_CONSUMER_KEY: ${OVH_CONSUMER_KEY}
+
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - traefik_certs:/letsencrypt
+
+    networks:
+      - postgres_network
+
+networks:
+  postgres_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  centrale_logs:
+  traefik_certs:
