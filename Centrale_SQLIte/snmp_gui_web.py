@@ -14,6 +14,10 @@ import sys
 import os
 import flet as ft
 from datetime import datetime
+from dotenv import load_dotenv
+load_dotenv()
+import threading
+import requests
 
 # Import de la classe fournie
 from snmp_database import SNMPDatabase
@@ -26,6 +30,9 @@ try:
 except ImportError:
     SNMP_SENDER_AVAILABLE = False
     PYSNMP_AVAILABLE = False
+
+OLLAMA_ENDPOINT = os.environ.get("OLLAMA_ENDPOINT", "http://openwebui.iutbeziers.fr:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.3:70b")
 
 
 class SNMPMonitorApp:
@@ -54,6 +61,66 @@ class SNMPMonitorApp:
         page.overlay.append(snackbar)
         snackbar.open = True
         page.update()
+
+    def check_ollama_server(self, endpoint):
+        """GET /api/tags pour vérifier la connexion au serveur Ollama"""
+        try:
+            url = endpoint.rstrip("/") + "/api/tags"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            models = [m.get("name", "?") for m in data.get("models", [])]
+            return True, models, None
+        except Exception as e:
+            return False, [], str(e)
+
+    def query_ollama(self, prompt, endpoint, model):
+        """POST /api/chat avec stream: False, retourne (ok, texte, erreur)"""
+        try:
+            url = endpoint.rstrip("/") + "/api/chat"
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+            resp = requests.post(url, json=payload, timeout=1200)
+            resp.raise_for_status()
+            data = resp.json()
+            content = data.get("message", {}).get("content", "")
+            return True, content, None
+        except Exception as e:
+            return False, "", str(e)
+
+    def get_anomalies_for_llm(self, limit=5):
+        """Récupère les N dernières anomalies pour le LLM (SQLite)"""
+        if not self.db:
+            return ""
+        try:
+            cursor = self.db.connection.cursor()
+            cursor.execute(
+                "SELECT * FROM paquets_recus "
+                "WHERE contenu_json LIKE '%alerte_securite%' "
+                "ORDER BY timestamp_reception DESC LIMIT ?",
+                (limit,)
+            )
+            anomalies = []
+            for row in cursor.fetchall():
+                p = dict(row)
+                contenu_json = p.get('contenu_json', '{}')
+                if len(contenu_json) > 500:
+                    contenu_json = contenu_json[:500] + "..."
+                anomalies.append({
+                    "timestamp": str(p.get('timestamp_reception', '')),
+                    "source": p.get('adresse_source', ''),
+                    "type_pdu": p.get('type_pdu', ''),
+                    "version": p.get('version_snmp', ''),
+                    "oid": p.get('oid_racine', ''),
+                    "contenu": contenu_json,
+                })
+            return json.dumps(anomalies, indent=2, ensure_ascii=False) if anomalies else ""
+        except Exception as e:
+            print(f"Erreur get_anomalies_for_llm: {e}")
+            return ""
 
     def get_dashboard_stats(self):
         """Récupère les stats réelles depuis la BDD pour le dashboard"""
@@ -1125,6 +1192,156 @@ class SNMPMonitorApp:
                                   disabled=total_init <= PAGE_SIZE, ref=btn_next_ref),
             ], alignment=ft.MainAxisAlignment.CENTER, spacing=20)
 
+            # --- Section Analyse IA ---
+            ia_endpoint_field = ft.TextField(
+                label="Endpoint Ollama", value=OLLAMA_ENDPOINT, width=350, prefix_icon=ft.Icons.LINK,
+            )
+            ia_model_field = ft.TextField(
+                label="Modèle", value=OLLAMA_MODEL, width=200, prefix_icon=ft.Icons.SMART_TOY,
+            )
+            ia_status_icon = ft.Icon(ft.Icons.CIRCLE, color=ft.Colors.GREY, size=20)
+            ia_status_text = ft.Text("Non testé", size=12, color=ft.Colors.GREY)
+
+            def on_test_ollama(e):
+                ia_status_icon.color = ft.Colors.ORANGE
+                ia_status_text.value = "Test en cours..."
+                ia_status_text.color = ft.Colors.ORANGE
+                test_btn.disabled = True
+                page.update()
+
+                def do_test():
+                    ok, models, err = self.check_ollama_server(ia_endpoint_field.value)
+                    if ok:
+                        ia_status_icon.color = ft.Colors.GREEN
+                        ia_status_text.value = f"Connecté ({len(models)} modèles)"
+                        ia_status_text.color = ft.Colors.GREEN
+                    else:
+                        ia_status_icon.color = ft.Colors.RED
+                        ia_status_text.value = f"Erreur: {err[:60]}"
+                        ia_status_text.color = ft.Colors.RED
+                    test_btn.disabled = False
+                    page.update()
+
+                threading.Thread(target=do_test, daemon=True).start()
+
+            test_btn = ft.ElevatedButton("Tester", icon=ft.Icons.WIFI_FIND, on_click=on_test_ollama)
+
+            ia_limit_dropdown = ft.Dropdown(
+                label="Anomalies à analyser", value="5",
+                options=[
+                    ft.dropdown.Option("5", "5 dernières"),
+                    ft.dropdown.Option("25", "25 dernières"),
+                    ft.dropdown.Option("50", "50 dernières"),
+                ],
+                width=200,
+            )
+
+            ia_analysis_type = ft.Dropdown(
+                label="Type d'analyse", value="menaces",
+                options=[
+                    ft.dropdown.Option("menaces", "Détection de menaces"),
+                    ft.dropdown.Option("resume", "Résumé exécutif"),
+                    ft.dropdown.Option("anomalies", "Patterns d'anomalies"),
+                    ft.dropdown.Option("custom", "Prompt personnalisé"),
+                ],
+                width=250,
+            )
+
+            ia_custom_prompt = ft.TextField(
+                label="Prompt personnalisé", multiline=True, min_lines=2, max_lines=4,
+                visible=False, expand=True,
+            )
+
+            def on_analysis_type_change(e):
+                ia_custom_prompt.visible = ia_analysis_type.value == "custom"
+                page.update()
+
+            ia_analysis_type.on_change = on_analysis_type_change
+
+            ia_spinner = ft.ProgressRing(width=20, height=20, stroke_width=3, visible=False)
+
+            ia_result_md = ft.Markdown("", selectable=True, extension_set=ft.MarkdownExtensionSet.GITHUB_WEB)
+            ia_result_container = ft.Container(
+                content=ia_result_md, visible=False, padding=15,
+                bgcolor=ft.Colors.GREY_50, border_radius=8,
+                border=ft.border.all(1, ft.Colors.GREY_300),
+            )
+
+            def on_analyze(e):
+                analyze_btn.disabled = True
+                ia_spinner.visible = True
+                ia_result_container.visible = False
+                page.update()
+
+                def do_analyze():
+                    limit = int(ia_limit_dropdown.value)
+                    anomalies_json = self.get_anomalies_for_llm(limit)
+
+                    if not anomalies_json:
+                        ia_result_md.value = "**Aucune anomalie trouvée dans la base de données.**"
+                        ia_result_container.visible = True
+                        analyze_btn.disabled = False
+                        ia_spinner.visible = False
+                        page.update()
+                        return
+
+                    analysis_prompts = {
+                        "menaces": "Analyse ces anomalies SNMP et identifie les menaces de sécurité potentielles. "
+                                   "Classe-les par niveau de criticité et propose des actions correctives.",
+                        "resume": "Fais un résumé exécutif concis de ces anomalies SNMP. "
+                                  "Identifie les tendances principales et les points d'attention.",
+                        "anomalies": "Identifie les patterns récurrents dans ces anomalies SNMP. "
+                                     "Quelles sont les sources les plus suspectes et pourquoi ?",
+                    }
+
+                    if ia_analysis_type.value == "custom":
+                        user_prompt = ia_custom_prompt.value or "Analyse ces anomalies SNMP."
+                    else:
+                        user_prompt = analysis_prompts.get(ia_analysis_type.value, analysis_prompts["menaces"])
+
+                    full_prompt = (
+                        "Tu es un expert en sécurité réseau spécialisé dans le protocole SNMP. "
+                        "Analyse les données suivantes capturées par un collecteur SNMP et fournis une analyse détaillée en français.\n\n"
+                        f"Consigne : {user_prompt}\n\n"
+                        f"Données des anomalies (JSON) :\n```json\n{anomalies_json}\n```"
+                    )
+
+                    ok, response_text, err = self.query_ollama(
+                        full_prompt, ia_endpoint_field.value, ia_model_field.value,
+                    )
+
+                    if ok:
+                        ia_result_md.value = response_text
+                    else:
+                        ia_result_md.value = f"**Erreur :** {err}"
+
+                    ia_result_container.visible = True
+                    analyze_btn.disabled = False
+                    ia_spinner.visible = False
+                    page.update()
+
+                threading.Thread(target=do_analyze, daemon=True).start()
+
+            analyze_btn = ft.ElevatedButton(
+                "Analyser avec l'IA", icon=ft.Icons.PSYCHOLOGY, on_click=on_analyze,
+                style=ft.ButtonStyle(color=ft.Colors.WHITE, bgcolor=ft.Colors.DEEP_PURPLE),
+            )
+
+            ia_section = ft.Card(
+                content=ft.Container(
+                    content=ft.Column([
+                        ft.Row([
+                            ia_endpoint_field, ia_model_field, test_btn, ia_status_icon, ia_status_text,
+                        ], spacing=10, wrap=True),
+                        ft.Divider(),
+                        ft.Row([ia_limit_dropdown, ia_analysis_type], spacing=15),
+                        ia_custom_prompt,
+                        ft.Row([analyze_btn, ia_spinner], spacing=15),
+                        ia_result_container,
+                    ]), padding=15,
+                ), elevation=2,
+            )
+
             return ft.Column([
                 ft.Row([
                     ft.Text("Détection d'Anomalies", size=24, weight=ft.FontWeight.BOLD),
@@ -1147,6 +1364,15 @@ class SNMPMonitorApp:
                         ]), padding=15,
                     ), elevation=2,
                 ),
+                ft.Container(height=25),
+                ft.Divider(),
+                ft.Container(height=15),
+                ft.Row([
+                    ft.Icon(ft.Icons.PSYCHOLOGY, color=ft.Colors.DEEP_PURPLE, size=28),
+                    ft.Text("Analyse IA des anomalies", size=20, weight=ft.FontWeight.BOLD),
+                ], spacing=10),
+                ft.Container(height=10),
+                ia_section,
             ], expand=True, scroll=ft.ScrollMode.AUTO)
 
         def create_stats_page():
