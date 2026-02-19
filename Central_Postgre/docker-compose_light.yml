@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+
+    env_file:
+      - .env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+    networks:
+      - postgres_network
+
+  centrale-postgre:
+    build: .
+    container_name: centrale-postgre
+    restart: unless-stopped
+
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+
+    ports:
+      - "8000:8000"
+      - "12000:12000"
+
+    volumes:
+      - centrale_logs:/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    networks:
+      - postgres_network
+
+networks:
+  postgres_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  centrale_logs:
