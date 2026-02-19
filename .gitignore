@@ -25,6 +25,9 @@ ssl/*.pem
 .idea/
 
 
+# Documentation detaillee (generee, locale uniquement)
+**/DOCUMENTATION.md
+
 # OS
 Thumbs.db
 .DS_Store

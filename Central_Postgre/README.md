@@ -95,40 +95,130 @@ Editer `.env` avec vos valeurs :
 | `OLLAMA_ENDPOINT` | URL du serveur Ollama | Non (analyse IA) |
 | `OLLAMA_MODEL` | Modèle LLM à utiliser | Non (analyse IA) |
 
-**Variables supplémentaires pour `docker-compose_full.yml` (Traefik)** :
+**Variables supplémentaires pour `docker-compose.yml` (Traefik)** :
 
 | Variable | Description |
 |---|---|
 | `DOMAIN` | Nom de domaine principal (ex: `example.com`) |
 | `API_SUBDOMAIN` | Sous-domaine de l'API (défaut : `api`) |
 | `CERTBOT_EMAIL` | Email pour Let's Encrypt |
-| `OVH_APPLICATION_KEY` | Clé application OVH (DNS challenge) |
-| `OVH_APPLICATION_SECRET` | Secret application OVH |
-| `OVH_CONSUMER_KEY` | Clé consommateur OVH |
+
+**Variables DNS challenge pour le certificat HTTPS** :
+
+Traefik obtient automatiquement un certificat Let's Encrypt via un DNS challenge. Le `docker-compose.yml` est configuré par défaut pour **OVH**, mais il peut être adapté à d'autres fournisseurs DNS en modifiant le provider et les variables d'environnement du service `traefik`.
+
+<details>
+<summary><strong>OVH</strong> (configuration par défaut)</summary>
+
+Provider Traefik : `ovh`
+
+```
+OVH_APPLICATION_KEY=VOTRE_APPLICATION_KEY
+OVH_APPLICATION_SECRET=VOTRE_APPLICATION_SECRET
+OVH_CONSUMER_KEY=VOTRE_CONSUMER_KEY
+```
+
+Les tokens sont générables sur https://api.ovh.com/createToken/
+
+</details>
+
+<details>
+<summary><strong>Cloudflare</strong></summary>
+
+Provider Traefik : `cloudflare`
+
+```
+CF_API_EMAIL=admin@example.com
+CF_API_KEY=VOTRE_GLOBAL_API_KEY
+```
+
+Ou avec un token API scopé (recommandé) :
+
+```
+CF_DNS_API_TOKEN=VOTRE_API_TOKEN
+```
+
+Le token doit avoir la permission `Zone:DNS:Edit`. Generez-le sur https://dash.cloudflare.com/profile/api-tokens
+
+</details>
+
+<details>
+<summary><strong>Gandi</strong></summary>
+
+Provider Traefik : `gandiv5`
+
+```
+GANDIV5_API_KEY=VOTRE_API_KEY
+```
+
+Clé API disponible dans les parametres de securité de votre compte Gandi.
+
+</details>
+
+<details>
+<summary><strong>DigitalOcean</strong></summary>
+
+Provider Traefik : `digitalocean`
+
+```
+DO_AUTH_TOKEN=VOTRE_API_TOKEN
+```
+
+Token generé depuis https://cloud.digitalocean.com/account/api/tokens avec le scope `write`.
+
+</details>
+
+<details>
+<summary><strong>AWS Route 53</strong></summary>
+
+Provider Traefik : `route53`
+
+```
+AWS_ACCESS_KEY_ID=VOTRE_ACCESS_KEY
+AWS_SECRET_ACCESS_KEY=VOTRE_SECRET_KEY
+AWS_REGION=eu-west-1
+```
+
+L'utilisateur IAM doit avoir la policy `AmazonRoute53FullAccess` (ou une policy custom sur `route53:ChangeResourceRecordSets` et `route53:GetChange`).
+
+</details>
+
+Pour changer de provider, modifiez dans `docker-compose.yml` la ligne :
+```yaml
+- "--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=ovh"
+```
+et remplacez `ovh` par le nom du provider souhaité, puis ajoutez les variables d'environnement correspondantes dans la section `environment` du service `traefik`.
+
+La liste complète des providers DNS supportés est disponible dans la [documentation Traefik](https://doc.traefik.io/traefik/https/acme/#providers).
 
 ### 3. Build et lancement
 
-**Déploiement simple** (accès direct aux ports) :
+**Déploiement complet avec reverse-proxy Traefik** (HTTPS automatique) :
 
 ```bash
 docker compose up -d --build
 ```
 
 Cela utilise `docker-compose.yml` et lance :
-- PostgreSQL sur le port `5432`
-- L'API sur le port `8000`
-- La GUI sur le port `12000`
+- PostgreSQL (réseau interne uniquement)
+- L'application (API + GUI) accessible via Traefik
+- Traefik qui gère le TLS via Let's Encrypt (DNS challenge OVH)
 
-**Déploiement avec reverse-proxy Traefik** (HTTPS automatique) :
+Routes :
+- `https://api.<DOMAIN>` -> API (port 8000)
+- `https://<DOMAIN>` -> GUI (port 12000)
+- Redirection HTTP -> HTTPS automatique
+
+**Déploiement léger** (accès direct aux ports, sans Traefik) :
 
 ```bash
-docker compose -f docker-compose_full.yml up -d --build
+docker compose -f docker-compose_light.yml up -d --build
 ```
 
-Cela ajoute Traefik qui gère le TLS via Let's Encrypt (DNS challenge OVH) :
-- `https://api.<DOMAIN>` → API (port 8000)
-- `https://<DOMAIN>` → GUI (port 12000)
-- Redirection HTTP → HTTPS automatique
+Cela lance uniquement :
+- PostgreSQL (réseau interne Docker, non exposé)
+- L'API sur le port `8000`
+- La GUI sur le port `12000`
 
 ### 4. Récupérer les identifiants
 
@@ -156,7 +246,7 @@ curl http://localhost:8000/health
 |---|---|
 | `postgres_data` | Données PostgreSQL |
 | `centrale_logs` | Logs applicatifs (`/data`) |
-| `traefik_certs` | Certificats Let's Encrypt (déploiement full uniquement) |
+| `traefik_certs` | Certificats Let's Encrypt (docker-compose.yml uniquement) |
 
 ### Arrêt et suppression
 
