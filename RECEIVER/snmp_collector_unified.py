@@ -78,13 +78,15 @@ try:
 except ImportError:
     SCAPY_AVAILABLE = False
 
-# Crypto pour déchiffrer DES (v3)
+# Crypto pour déchiffrer DES/AES (v3)
 try:
     from Cryptodome.Cipher import DES as DES_cipher
+    from Cryptodome.Cipher import AES as AES_cipher
     CRYPTO_AVAILABLE = True
 except ImportError:
     try:
         from Crypto.Cipher import DES as DES_cipher
+        from Crypto.Cipher import AES as AES_cipher
         CRYPTO_AVAILABLE = True
     except ImportError:
         CRYPTO_AVAILABLE = False
@@ -229,6 +231,50 @@ def _decrypt_des_cbc(encrypted: bytes, priv_password: str,
         return None
 
 
+def _decrypt_aes_cfb(encrypted: bytes, priv_password: str,
+                     engine_id: bytes, priv_params: bytes,
+                     engine_boots: int, engine_time: int,
+                     key_size: int = 16) -> Optional[bytes]:
+    """Déchiffre un ScopedPDU chiffré en AES-CFB (RFC 3826 / Blumenthal).
+
+    Args:
+        key_size: 16 pour AES-128, 32 pour AES-256.
+    """
+    if not CRYPTO_AVAILABLE or len(priv_params) != 8:
+        return None
+    localized_key = _password_to_key_sha(priv_password, engine_id)
+    if key_size == 16:
+        aes_key = localized_key[:16]
+    else:
+        # AES-256 : extension de la clé localisée à 32 octets
+        extended = localized_key + hashlib.sha1(localized_key).digest()
+        aes_key = extended[:32]
+    # IV (16 octets) : engine_boots(4) || engine_time(4) || priv_params(8)
+    iv = (engine_boots.to_bytes(4, 'big')
+          + engine_time.to_bytes(4, 'big')
+          + priv_params)
+    try:
+        cipher = AES_cipher.new(aes_key, AES_cipher.MODE_CFB, iv,
+                                segment_size=128)
+        return cipher.decrypt(encrypted)
+    except Exception:
+        return None
+
+
+def _decrypt_scoped_pdu(encrypted: bytes, priv_password: str,
+                        engine_id: bytes, priv_params: bytes,
+                        engine_boots: int, engine_time: int,
+                        priv_protocol: str = 'DES') -> Optional[bytes]:
+    """Dispatcher : appelle la bonne fonction de déchiffrement selon le protocole."""
+    if priv_protocol == 'DES':
+        return _decrypt_des_cbc(encrypted, priv_password, engine_id, priv_params)
+    elif priv_protocol in ('AES128', 'AES256'):
+        key_size = 16 if priv_protocol == 'AES128' else 32
+        return _decrypt_aes_cfb(encrypted, priv_password, engine_id, priv_params,
+                                engine_boots, engine_time, key_size)
+    return None
+
+
 # ============================================================================
 # PARSEUR BER MANUEL (gère tous les tags ASN.1 y compris context-specific)
 # ============================================================================
@@ -322,7 +368,8 @@ def _ber_value_to_str(tag_byte: int, value: bytes) -> str:
 # PARSEUR SNMPv3 BRUT
 # ============================================================================
 
-def parse_snmpv3_raw(raw_bytes: bytes, priv_password: str = None) -> Optional[Dict]:
+def parse_snmpv3_raw(raw_bytes: bytes, priv_password: str = None,
+                     priv_protocol: str = 'DES') -> Optional[Dict]:
     """Parse un paquet SNMPv3 brut (bytes UDP payload)."""
     try:
         top = _ber_read_tlv(raw_bytes, 0)
@@ -361,6 +408,8 @@ def parse_snmpv3_raw(raw_bytes: bytes, priv_password: str = None) -> Optional[Di
             return None
 
         engine_id = usm_children[0][1]
+        engine_boots = _ber_to_int(usm_children[1][1])
+        engine_time = _ber_to_int(usm_children[2][1])
         username = usm_children[3][1].decode('utf-8', errors='replace')
         priv_params = usm_children[5][1]
 
@@ -375,8 +424,9 @@ def parse_snmpv3_raw(raw_bytes: bytes, priv_password: str = None) -> Optional[Di
 
         if priv_flag and msg_data_tag == 0x04:
             if priv_password and engine_id:
-                decrypted = _decrypt_des_cbc(
-                    msg_data_value, priv_password, engine_id, priv_params
+                decrypted = _decrypt_scoped_pdu(
+                    msg_data_value, priv_password, engine_id, priv_params,
+                    engine_boots, engine_time, priv_protocol
                 )
                 if decrypted:
                     pdu_type, request_id, error_status, error_index, varbinds = \
@@ -621,7 +671,7 @@ class UnifiedSNMPCollector:
                  auth_password: str = None, priv_password: str = None,
                  engine_id_hex: str = None, poll_interval: int = 60,
                  num_workers: int = 3, verbose: bool = True,
-                 listen_port: int = 162):
+                 listen_port: int = 162, priv_protocol: str = 'DES'):
 
         self.api_endpoint = api_endpoint
         self.api_key = api_key
@@ -637,6 +687,7 @@ class UnifiedSNMPCollector:
         self.priv_password = priv_password
         self.engine_id_hex = engine_id_hex
         self.poll_interval = poll_interval
+        self.priv_protocol = priv_protocol
 
         # Mode v3 activé si tous les credentials sont fournis
         self.v3_enabled = all([switch_ip, username, auth_password, priv_password])
@@ -701,8 +752,12 @@ class UnifiedSNMPCollector:
         logger.info(f"[INIT] Scapy: {'OUI' if SCAPY_AVAILABLE else 'NON'}")
         if self.v3_enabled:
             logger.info(f"[INIT] Mode v3: OUI (switch: {switch_ip})")
-            logger.info(f"[INIT] Utilisateur SNMPv3: {username} (SHA/DES)")
-            logger.info(f"[INIT] Déchiffrement DES: "
+            proto_label = {'DES': 'DES', 'AES128': 'AES-128',
+                           'AES256': 'AES-256'}.get(self.priv_protocol,
+                                                     self.priv_protocol)
+            logger.info(f"[INIT] Utilisateur SNMPv3: {username} "
+                         f"(SHA/{proto_label})")
+            logger.info(f"[INIT] Déchiffrement {proto_label}: "
                          f"{'OUI' if self.v3_decrypt else 'NON'}")
             logger.info(f"[INIT] Polling actif: "
                          f"{'OUI' if HLAPI_AVAILABLE else 'NON'}")
@@ -898,7 +953,7 @@ class UnifiedSNMPCollector:
     def _parse_v3_packet(self, raw_data, src_ip, src_port, dst_ip, dst_port):
         """Parse un paquet SNMPv3 brut. Retourne (packet_info, is_decrypted)."""
         priv_pw = self.priv_password if self.v3_decrypt else None
-        parsed = parse_snmpv3_raw(raw_data, priv_pw)
+        parsed = parse_snmpv3_raw(raw_data, priv_pw, self.priv_protocol)
         if not parsed:
             return None
 
@@ -1253,9 +1308,19 @@ class UnifiedSNMPCollector:
             poll_count += 1
             try:
                 hlapi_engine = HlapiEngine()
+                # Sélection du protocole de chiffrement pysnmp
+                if self.priv_protocol == 'AES128':
+                    priv_proto = config.USM_PRIV_CFB128_AES
+                elif self.priv_protocol == 'AES256':
+                    priv_proto = getattr(
+                        config, 'USM_PRIV_CFB256_AES_BLUMENTHAL',
+                        getattr(config, 'USM_PRIV_CFB256_AES',
+                                config.USM_PRIV_CFB128_AES))
+                else:
+                    priv_proto = PRIV_DES
                 user_data = HlapiUsmUserData(
                     self.username, self.auth_password, self.priv_password,
-                    authProtocol=AUTH_SHA, privProtocol=PRIV_DES
+                    authProtocol=AUTH_SHA, privProtocol=priv_proto
                 )
                 try:
                     target = await HlapiTarget.create(
@@ -1495,7 +1560,11 @@ Exemples:
                           help="Mot de passe auth SHA (env: SNMP_V3_AUTH_PASSWORD)")
     v3_group.add_argument('--priv-password',
                           default=os.environ.get('SNMP_V3_PRIV_PASSWORD'),
-                          help='Mot de passe chiffrement DES (env: SNMP_V3_PRIV_PASSWORD)')
+                          help='Mot de passe chiffrement (env: SNMP_V3_PRIV_PASSWORD)')
+    v3_group.add_argument('--priv-protocol',
+                          default=os.environ.get('SNMP_V3_PRIV_PROTOCOL', 'DES'),
+                          choices=['DES', 'AES128', 'AES256'],
+                          help='Protocole de chiffrement (env: SNMP_V3_PRIV_PROTOCOL, défaut: DES)')
     v3_group.add_argument('-e', '--engine-id',
                           default=os.environ.get('SNMP_V3_ENGINE_ID'),
                           help='Engine ID en hexadécimal (env: SNMP_V3_ENGINE_ID)')
@@ -1534,6 +1603,7 @@ Exemples:
         num_workers=args.workers,
         verbose=not args.quiet,
         listen_port=args.port,
+        priv_protocol=args.priv_protocol,
     )
 
     try:
