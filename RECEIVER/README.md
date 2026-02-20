@@ -13,7 +13,7 @@ Script Python unique qui assure toute la chaîne de collecte SNMP. Il intègre :
 - **Capture passive** : Scapy écoute en mode promiscuous sur l'interface réseau configurée et capture tout le trafic SNMP (v2c et v3) transitant sur le réseau.
 - **Polling actif SNMPv3** : interrogation périodique du switch cible via SNMPv3 GET (pysnmp HLAPI). Récupère les informations système (`sysDescr`, `sysUpTime`, `sysName`...) et les compteurs d'interfaces (`ifInOctets`, `ifOutOctets`, `ifOperStatus`...).
 - **Parsing BER/ASN.1** : décodage bas niveau des paquets SNMPv3 sans dépendance externe (TLV, OID, entiers, chaînes). Les paquets v2c sont parsés via la couche Scapy native.
-- **Déchiffrement SNMPv3** : dérivation de clé SHA selon RFC 3414 + déchiffrement DES-CBC des PDU chiffrées, permettant de lire le contenu des paquets v3 capturés passivement.
+- **Déchiffrement SNMPv3** : dérivation de clé SHA selon RFC 3414 + déchiffrement DES-CBC, AES-128-CFB (RFC 3826) ou AES-256-CFB (Blumenthal/Reeder) des PDU chiffrées, permettant de lire le contenu des paquets v3 capturés passivement. Le protocole est configurable via `SNMP_V3_PRIV_PROTOCOL`.
 - **Détection de menaces** : analyse de sévérité par scoring (NORMAL / SUSPECT / ELEVEE / CRITIQUE) basée sur le type PDU, les VarBinds, et le comportement dans le temps par IP source (flood, scan de communautés, brute-force auth v3, reconnaissance OID).
 - **File d'attente thread-safe** : les paquets capturés sont mis en file (`SNMPPacketQueue`) puis envoyés par lot vers l'API REST par des workers parallèles.
 - **Tracking par IP** : la classe `IPTracker` maintient un historique glissant par IP source (timestamps, communautés testées, échecs d'authentification, OIDs interrogés) pour la détection comportementale.
@@ -31,16 +31,16 @@ Script utilitaire qui envoie des requêtes SNMPv3 SET vers le switch pour simule
 - Docker et Docker Compose installés.
 - Accès réseau au switch SNMP (port 161) et à l'API REST (HTTPS).
 
-### 1. Copier les fichiers sur la machine cible
+### 1. Cloner le dépôt sur la machine cible
 
 ```bash
-scp Dockerfile docker-compose.yml requirements.txt snmp_collector_unified.py .env.example utilisateur@IP_MACHINE:/chemin/collecteur/
+git clone https://github.com/MathisP-afk/Beta-SNMP.git
+cd Beta-SNMP/RECEIVER
 ```
 
 ### 2. Configurer l'environnement
 
 ```bash
-cd /chemin/collecteur
 cp .env.example .env
 nano .env
 ```
@@ -69,7 +69,8 @@ nano .env
 | `SNMP_SWITCH_IP` | IP du switch à interroger | Oui |
 | `SNMP_V3_USERNAME` | Utilisateur SNMPv3 (USM) | Oui |
 | `SNMP_V3_AUTH_PASSWORD` | Mot de passe d'authentification (SHA) | Oui |
-| `SNMP_V3_PRIV_PASSWORD` | Mot de passe de chiffrement (DES) | Oui |
+| `SNMP_V3_PRIV_PASSWORD` | Mot de passe de chiffrement | Oui |
+| `SNMP_V3_PRIV_PROTOCOL` | Protocole de chiffrement (`DES`, `AES128`, `AES256`) | `DES` |
 | `SNMP_V3_ENGINE_ID` | Engine ID du switch (hexadécimal) | Oui |
 | `SNMP_POLL_INTERVAL` | Intervalle de polling en secondes | `60` |
 
