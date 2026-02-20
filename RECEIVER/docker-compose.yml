@@ -1,0 +1,38 @@
+# docker-compose.yml — Collecteur SNMP Unifie (conteneurise)
+#
+# Deploiement :
+#   1. Configurer le .env (API URL, credentials SNMPv3, interface reseau, etc.)
+#   2. docker compose up -d
+#
+# IMPORTANT : network_mode: host est requis pour que Scapy capture
+#             le trafic SNMP via port mirroring (SPAN).
+#             Adapter SNMP_INTERFACE au nom de l'interface Linux (ex: eth0, ens18).
+
+services:
+  collecteur-snmp:
+    build: .
+    container_name: collecteur-snmp
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    # Mode reseau host : acces direct aux interfaces reseau de l'hote
+    # Necessaire pour la capture Scapy en mode promiscuous (port mirroring SPAN)
+    network_mode: host
+
+    # Resolution DNS (necessaire si le hosts de l'hote ne contient pas ces entrees)
+    extra_hosts:
+      - "api.sae.botturi.fr:10.202.0.224"
+      - "sae.botturi.fr:10.202.0.224"
+
+    # Privileges reseau pour Scapy
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+
+    volumes:
+      - collecteur_logs:/data
+
+volumes:
+  collecteur_logs:

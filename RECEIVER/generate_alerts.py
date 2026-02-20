@@ -17,7 +17,7 @@ import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-API_URL = "https://10.204.0.158:8000"
+API_URL = "https://api.sae.botturi.fr"
 API_KEY = "GDT98WBtTizrMUQcxEGD1Aw7YNzGL0qiywklUfD2i4PRNng4LWE018jYjrOCgKCm"
 
 # --- Données aléatoires ---
