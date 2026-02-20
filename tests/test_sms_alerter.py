@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 # --- Configuration des chemins d'import ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
-api_path = os.path.join(current_dir, '../../Centrale_SQLIte')
+api_path = os.path.join(current_dir, '..', 'Centrale_SQLIte')
 sys.path.append(api_path)
 
 # Charger le .env.test depuis le répertoire tests/

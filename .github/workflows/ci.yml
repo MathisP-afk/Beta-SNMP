@@ -45,3 +45,13 @@ jobs:
       run: |
         export PYTHONPATH="$(pwd)/Centrale_SQLIte"
         python -m unittest tests/test_centrale_sqlite.py -v
+
+    - name: Tests unitaires - Centrale PostgreSQL
+      run: |
+        export PYTHONPATH="$(pwd)/Central_Postgre"
+        python -m unittest tests/test_centrale_postgre.py -v
+
+    - name: Tests unitaires - Alertes SMS
+      run: |
+        export PYTHONPATH="$(pwd)/Centrale_SQLIte"
+        python -m unittest tests/test_sms_alerter.py -v
