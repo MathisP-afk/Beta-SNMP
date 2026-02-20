@@ -1,6 +1,6 @@
 # Collecteur SNMP Unifié — SNMP Monitoring
 
-Collecteur SNMP hybride supportant SNMPv2c et SNMPv3, déployable via Docker. Il combine une capture passive (Scapy en mode promiscuous via port mirroring SPAN) et un polling actif SNMPv3, avec détection de menaces en temps réel et envoi vers l'API REST centrale.
+Collecteur SNMP hybride supportant SNMPv2c et SNMPv3, déployable via Docker. Il combine une capture passive (Scapy en mode promiscuous) et un polling actif SNMPv3, avec détection de menaces en temps réel et envoi vers l'API REST centrale.
 
 ---
 
@@ -10,7 +10,7 @@ Collecteur SNMP hybride supportant SNMPv2c et SNMPv3, déployable via Docker. Il
 
 Script Python unique qui assure toute la chaîne de collecte SNMP. Il intègre :
 
-- **Capture passive** : Scapy écoute en mode promiscuous sur l'interface réseau configurée et capture tout le trafic SNMP (v2c et v3) transitant sur le réseau. Nécessite du port mirroring (SPAN) sur le switch.
+- **Capture passive** : Scapy écoute en mode promiscuous sur l'interface réseau configurée et capture tout le trafic SNMP (v2c et v3) transitant sur le réseau.
 - **Polling actif SNMPv3** : interrogation périodique du switch cible via SNMPv3 GET (pysnmp HLAPI). Récupère les informations système (`sysDescr`, `sysUpTime`, `sysName`...) et les compteurs d'interfaces (`ifInOctets`, `ifOutOctets`, `ifOperStatus`...).
 - **Parsing BER/ASN.1** : décodage bas niveau des paquets SNMPv3 sans dépendance externe (TLV, OID, entiers, chaînes). Les paquets v2c sont parsés via la couche Scapy native.
 - **Déchiffrement SNMPv3** : dérivation de clé SHA selon RFC 3414 + déchiffrement DES-CBC des PDU chiffrées, permettant de lire le contenu des paquets v3 capturés passivement.
@@ -30,8 +30,6 @@ Script utilitaire qui envoie des requêtes SNMPv3 SET vers le switch pour simule
 ### Prérequis
 
 - Docker et Docker Compose installés.
-- Machine Linux (la capture passive Scapy nécessite `network_mode: host`).
-- Port mirroring SPAN configuré sur le switch vers l'interface de la machine.
 - Accès réseau au switch SNMP (port 161) et à l'API REST (HTTPS).
 
 ### 1. Copier les fichiers sur la machine cible
