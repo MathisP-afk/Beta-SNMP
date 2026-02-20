@@ -1,4 +1,4 @@
-# Collecteur SNMP Unifié — SNMP Monitoring
+# Collecteur SNMP Unifié
 
 Collecteur SNMP hybride supportant SNMPv2c et SNMPv3, déployable via Docker. Il combine une capture passive (Scapy en mode promiscuous) et un polling actif SNMPv3, avec détection de menaces en temps réel et envoi vers l'API REST centrale.
 
