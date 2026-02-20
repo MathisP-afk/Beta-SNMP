@@ -1,4 +1,4 @@
-# Beta-SNMP — Outil de supervision SNMP
+# NSMNPGN
 
 Projet SAE 501-502 (BUT Réseaux & Télécoms, 3e année) — Outil logiciel de capture, stockage, analyse et visualisation du trafic SNMP (v2c et v3) sur un réseau local, avec détection d'anomalies de sécurité.
 
