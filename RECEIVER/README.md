@@ -14,7 +14,6 @@ Script Python unique qui assure toute la chaîne de collecte SNMP. Il intègre :
 - **Polling actif SNMPv3** : interrogation périodique du switch cible via SNMPv3 GET (pysnmp HLAPI). Récupère les informations système (`sysDescr`, `sysUpTime`, `sysName`...) et les compteurs d'interfaces (`ifInOctets`, `ifOutOctets`, `ifOperStatus`...).
 - **Parsing BER/ASN.1** : décodage bas niveau des paquets SNMPv3 sans dépendance externe (TLV, OID, entiers, chaînes). Les paquets v2c sont parsés via la couche Scapy native.
 - **Déchiffrement SNMPv3** : dérivation de clé SHA selon RFC 3414 + déchiffrement DES-CBC des PDU chiffrées, permettant de lire le contenu des paquets v3 capturés passivement.
-- **Résolution OID** : bibliothèque intégrée de 34 OIDs courants (MIB-II système, interfaces, traps standards, Cisco, ressources hôte) traduits en noms lisibles.
 - **Détection de menaces** : analyse de sévérité par scoring (NORMAL / SUSPECT / ELEVEE / CRITIQUE) basée sur le type PDU, les VarBinds, et le comportement dans le temps par IP source (flood, scan de communautés, brute-force auth v3, reconnaissance OID).
 - **File d'attente thread-safe** : les paquets capturés sont mis en file (`SNMPPacketQueue`) puis envoyés par lot vers l'API REST par des workers parallèles.
 - **Tracking par IP** : la classe `IPTracker` maintient un historique glissant par IP source (timestamps, communautés testées, échecs d'authentification, OIDs interrogés) pour la détection comportementale.
